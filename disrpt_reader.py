@@ -1,8 +1,8 @@
 from masses import flags_to_masses
 
 
-def read_tok_document(path: str, doc_id: str | None = None) -> tuple[str, list[int]]:
-    """Parse one document out of a DISRPT .tok file into (doc_id, masses).
+def read_tok_document(path: str, doc_id: str | None = None) -> tuple[str, list[str], list[int]]:
+    """Parse one document out of a DISRPT .tok file into (doc_id, tokens, masses).
 
     .tok format: tab-separated columns (token index, token, 8 unused columns,
     misc), one token per line. A `# newdoc_id = <id>` comment line starts each
@@ -12,6 +12,7 @@ def read_tok_document(path: str, doc_id: str | None = None) -> tuple[str, list[i
     If doc_id is None, parses the first document in the file. Raises
     ValueError if doc_id is given but not found.
     """
+    tokens: list[str] = []
     flags: list[bool] = []
     current_id: str | None = None
     found = False
@@ -26,6 +27,7 @@ def read_tok_document(path: str, doc_id: str | None = None) -> tuple[str, list[i
                 current_id = line.split("=", 1)[1].strip()
                 if doc_id is None or current_id == doc_id:
                     found = True
+                    tokens = []
                     flags = []
                 continue
 
@@ -36,10 +38,11 @@ def read_tok_document(path: str, doc_id: str | None = None) -> tuple[str, list[i
                 break  # blank line ends the document
 
             fields = line.split("\t")
+            tokens.append(fields[1])
             misc = fields[-1]
             flags.append("BeginSeg=Yes" in misc.split("|"))
 
     if not found:
         raise ValueError(f"document {doc_id!r} not found in {path}")
 
-    return current_id, flags_to_masses(flags)
+    return current_id, tokens, flags_to_masses(flags)

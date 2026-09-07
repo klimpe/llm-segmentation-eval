@@ -14,12 +14,15 @@ pytestmark = pytest.mark.skipif(
 
 
 def test_first_document_token_count():
-    doc_id, masses = read_tok_document(CORPUS_PATH)
+    doc_id, tokens, masses = read_tok_document(CORPUS_PATH)
     assert doc_id == "GUM_academic_exposure"
     # eyeballed against the source file: 964 token lines, 110 lines with
     # BeginSeg=Yes (including the first token)
+    assert len(tokens) == 964
     assert sum(masses) == 964
     assert len(masses) == 110
+    assert tokens[0] == "Introduction"
+    assert tokens[1] == "Research"
 
 
 def test_named_document_matches_first():
@@ -29,9 +32,9 @@ def test_named_document_matches_first():
 
 
 def test_second_document():
-    doc_id, masses = read_tok_document(CORPUS_PATH, doc_id="GUM_academic_librarians")
+    doc_id, tokens, masses = read_tok_document(CORPUS_PATH, doc_id="GUM_academic_librarians")
     assert doc_id == "GUM_academic_librarians"
-    assert sum(masses) > 0
+    assert len(tokens) == sum(masses) > 0
 
 
 def test_unknown_document_raises():
