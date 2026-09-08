@@ -104,6 +104,50 @@ def test_segment_document_uses_cache_on_second_call(tmp_path):
     assert client.call_count == 1  # second call reused the cached file
 
 
+def test_segment_document_retries_on_empty_cached_file(tmp_path):
+    # an empty cache file (e.g. left behind by a response that burned its
+    # whole token budget on thinking and returned no text) must not be
+    # treated as a valid cache hit
+    (tmp_path / "doc1.txt").write_text("")
+    tokens = ["a"] * 10
+    ref_masses = [3, 4, 3]
+    client = StubClient("[1, 4, 8]")
+
+    hyp_masses = segment_document(tokens, ref_masses, "doc1", tmp_path, client=client)
+
+    assert hyp_masses == [3, 4, 3]
+    assert client.call_count == 1
+    assert (tmp_path / "doc1.txt").read_text() == "[1, 4, 8]"
+
+
+def test_segment_document_retries_on_truncated_cached_content(tmp_path):
+    # a non-empty but truncated/unparseable cache file (e.g. a response cut
+    # off mid-JSON-array) must also not be treated as a valid cache hit
+    (tmp_path / "doc1.txt").write_text("[1, 4, 8")  # missing closing bracket
+    tokens = ["a"] * 10
+    ref_masses = [3, 4, 3]
+    client = StubClient("[1, 4, 8]")
+
+    hyp_masses = segment_document(tokens, ref_masses, "doc1", tmp_path, client=client)
+
+    assert hyp_masses == [3, 4, 3]
+    assert client.call_count == 1
+    assert (tmp_path / "doc1.txt").read_text() == "[1, 4, 8]"
+
+
+def test_segment_document_still_raises_when_retry_also_fails(tmp_path):
+    (tmp_path / "doc1.txt").write_text("garbage, no array here")
+    tokens = ["a"] * 10
+    ref_masses = [3, 4, 3]
+    client = StubClient("still no array")  # the fresh call also fails to parse
+
+    with pytest.raises(ValueError, match="no JSON array"):
+        segment_document(tokens, ref_masses, "doc1", tmp_path, client=client)
+
+    assert client.call_count == 1  # exactly one fresh attempt, no retry loop
+    assert (tmp_path / "doc1.txt").read_text() == "still no array"  # overwritten for diagnosis
+
+
 def test_segment_document_raises_on_alignment_failure_but_still_persists_raw(tmp_path):
     tokens = ["a"] * 10
     ref_masses = [3, 4, 3]

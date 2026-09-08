@@ -67,6 +67,33 @@ def window_diff(ref_masses: list[int], hyp_masses: list[int], k: int | None = No
     return disagreements / n_windows
 
 
+def corpus_micro_boundary_prf(pairs: list[tuple[list[int], list[int]]]) -> tuple[float, float, float]:
+    """Corpus-level micro-averaged boundary precision/recall/F1 over several
+    documents, replicating DISRPT's official `seg_eval.py` exactly: pool
+    true/false positives/negatives across every document's tokens (including
+    each document's trivial first-token boundary) rather than averaging
+    per-document scores. This is what published DISRPT system scores report,
+    and it is not the same number as the mean of boundary_f1 over documents
+    (that would be a macro average) -- use this specifically when comparing
+    against them.
+
+    `pairs` is a list of (ref_masses, hyp_masses) for each document.
+    """
+    tp = fp = fn = 0
+    for ref_masses, hyp_masses in pairs:
+        assert_comparable(ref_masses, hyp_masses)
+        ref_b = masses_to_boundaries(ref_masses)
+        hyp_b = masses_to_boundaries(hyp_masses)
+        tp += len(ref_b & hyp_b) + 1  # +1: every document's first token is a trivial match
+        fn += len(ref_b - hyp_b)
+        fp += len(hyp_b - ref_b)
+
+    precision = tp / (tp + fp) if (tp + fp) else 0.0
+    recall = tp / (tp + fn) if (tp + fn) else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
+    return precision, recall, f1
+
+
 def boundary_similarity(ref_masses: list[int], hyp_masses: list[int], n_t: int = 2) -> float:
     """Boundary Similarity (Fournier & Inkpen, 2012; Fournier, 2013).
 

@@ -45,6 +45,13 @@ def call_model(prompt: str, model: str = DEFAULT_MODEL, client: Anthropic | None
     response = client.messages.create(
         model=model,
         max_tokens=8192,
+        # This task just needs a JSON array back, not a rationale. With
+        # thinking left on its default, some responses burned the entire
+        # max_tokens budget on thinking (stop_reason="max_tokens",
+        # thinking_tokens=8192) and returned zero text blocks -- an
+        # alignment failure for every such document. Disabling it fixes
+        # this and is cheaper.
+        thinking={"type": "disabled"},
         messages=[{"role": "user", "content": prompt}],
     )
     return "".join(block.text for block in response.content if block.type == "text")
@@ -92,18 +99,29 @@ def segment_document(
     verifies they cover the same number of tokens as ref_masses. Raises
     ValueError on any parse or alignment failure -- callers must catch this,
     set the document aside, and report it, never compute a metric on it.
+
+    A cached file that turns out to be empty or otherwise unusable (e.g. a
+    response truncated mid-JSON) is not treated as a valid cache hit: it is
+    retried once with a fresh call, which overwrites it.
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     raw_path = output_dir / f"{doc_id}.txt"
 
     if raw_path.exists():
-        raw_output = raw_path.read_text(encoding="utf-8")
-    else:
-        prompt = build_prompt(tokens)
-        raw_output = call_model(prompt, model=model, client=client)
-        raw_path.write_text(raw_output, encoding="utf-8")
+        cached_output = raw_path.read_text(encoding="utf-8")
+        try:
+            return _parse_and_align(cached_output, ref_masses, tokens)
+        except ValueError:
+            pass  # cached response is unusable; fall through to a fresh call
 
+    prompt = build_prompt(tokens)
+    raw_output = call_model(prompt, model=model, client=client)
+    raw_path.write_text(raw_output, encoding="utf-8")
+    return _parse_and_align(raw_output, ref_masses, tokens)
+
+
+def _parse_and_align(raw_output: str, ref_masses: list[int], tokens: list[str]) -> list[int]:
     indices = parse_boundary_indices(raw_output)
     hyp_masses = indices_to_masses(indices, len(tokens))
     assert_comparable(ref_masses, hyp_masses)

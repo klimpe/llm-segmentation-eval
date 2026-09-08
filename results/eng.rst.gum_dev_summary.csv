@@ -1,0 +1,12 @@
+metric,value
+n_docs_scored,24
+n_docs_failed,0
+macro_mean_f1,0.5652936858190264
+macro_mean_window_diff,0.3130393394290871
+macro_mean_boundary_similarity,0.48412529470266
+corpus_micro_precision,0.5334709525213801
+corpus_micro_recall,0.6483870967741936
+corpus_micro_f1,0.5853421776411584
+disrpt_2023_discut_test_precision,0.9495
+disrpt_2023_discut_test_recall,0.9398000000000001
+disrpt_2023_discut_test_f1,0.9445999999999999
