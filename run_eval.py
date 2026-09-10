@@ -26,6 +26,15 @@ LLM_OUTPUT_DIR = Path("llm_output")
 # while everything here runs on the *dev* split (the only one downloaded).
 DISRPT_2023_GUM_PLAIN_BASELINE = {"precision": 94.95, "recall": 93.98, "f1": 94.46}
 
+# The Reddit genre's text is masked in the open distribution of GUM (each
+# token replaced by underscores of the same length, e.g. "______"); the real
+# text requires utils/process_underscores.py plus a live Reddit fetch, which
+# we do not have. Segmenting underscore placeholders is not a real test of
+# the model and produced a striking outlier (F1 0.074) for exactly that
+# reason -- excluded here rather than silently left in an aggregate.
+EXCLUDED_DOC_ID_PREFIX = "GUM_reddit"
+EXCLUDED_REASON = "Reddit text is masked (underscored) in the open GUM distribution, not real text"
+
 
 def genre_of(doc_id: str) -> str:
     # doc_id format: GUM_<genre>_<name>
@@ -33,8 +42,10 @@ def genre_of(doc_id: str) -> str:
 
 
 def main():
-    docs = list(iter_tok_documents(CORPUS_PATH))
-    print(f"Loaded {len(docs)} documents from {CORPUS_PATH}\n")
+    all_docs = list(iter_tok_documents(CORPUS_PATH))
+    docs = [d for d in all_docs if not d[0].startswith(EXCLUDED_DOC_ID_PREFIX)]
+    excluded = [d[0] for d in all_docs if d[0].startswith(EXCLUDED_DOC_ID_PREFIX)]
+    print(f"Loaded {len(all_docs)} documents from {CORPUS_PATH}, excluded {len(excluded)} ({EXCLUDED_DOC_ID_PREFIX}*)\n")
 
     rows = []
     failures = []
@@ -72,8 +83,20 @@ def main():
 
     emit("# eng.rst.gum dev -- LLM discourse segmentation results")
     emit()
-    emit(f"{len(rows)} of {len(docs)} documents scored; {len(failures)} failed alignment.")
+    emit(
+        f"{len(rows)} of {len(all_docs)} documents scored; {len(failures)} failed alignment; "
+        f"{len(excluded)} excluded."
+    )
     emit()
+
+    if excluded:
+        emit("## Excluded documents (not sent to the model, not counted anywhere below)")
+        emit()
+        emit(f"Reason: {EXCLUDED_REASON}.")
+        emit()
+        for doc_id in excluded:
+            emit(f"- {doc_id}")
+        emit()
 
     if failures:
         emit("## Alignment failures (excluded from all metrics below)")
@@ -160,10 +183,14 @@ def main():
     results_dir.mkdir(exist_ok=True)
     Path("results/eng.rst.gum_dev.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-    write_csvs(results_dir, rows, failures, genre_rows_out, macro_f1, macro_wd, macro_bs, micro_p, micro_r, micro_f1)
+    write_csvs(
+        results_dir, rows, failures, excluded, genre_rows_out, macro_f1, macro_wd, macro_bs, micro_p, micro_r, micro_f1
+    )
 
 
-def write_csvs(results_dir, rows, failures, genre_rows, macro_f1, macro_wd, macro_bs, micro_p, micro_r, micro_f1):
+def write_csvs(
+    results_dir, rows, failures, excluded, genre_rows, macro_f1, macro_wd, macro_bs, micro_p, micro_r, micro_f1
+):
     doc_fields = [
         "doc_id",
         "genre",
@@ -185,6 +212,11 @@ def write_csvs(results_dir, rows, failures, genre_rows, macro_f1, macro_wd, macr
         writer = csv.writer(f)
         writer.writerow(["doc_id", "reason"])
         writer.writerows(failures)
+
+    with open(results_dir / "eng.rst.gum_dev_excluded.csv", "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["doc_id", "reason"])
+        writer.writerows((doc_id, EXCLUDED_REASON) for doc_id in excluded)
 
     genre_fields = [
         "genre",

@@ -1,6 +1,13 @@
 # eng.rst.gum dev -- LLM discourse segmentation results
 
-24 of 24 documents scored; 0 failed alignment.
+22 of 24 documents scored; 0 failed alignment; 2 excluded.
+
+## Excluded documents (not sent to the model, not counted anywhere below)
+
+Reason: Reddit text is masked (underscored) in the open GUM distribution, not real text.
+
+- GUM_reddit_macroeconomics
+- GUM_reddit_pandas
 
 ## Per-document results
 
@@ -18,8 +25,6 @@ GUM_interview_cyclone          interview         866  103  150  0.154  0.225  0.
 GUM_interview_gaming           interview         719   85   86  0.941  0.952  0.947  0.050  0.899
 GUM_news_homeopathic           news              649   79  112  0.532  0.756  0.624  0.330  0.508
 GUM_news_iodine                news             1071  125  168  0.569  0.766  0.653  0.301  0.521
-GUM_reddit_macroeconomics      reddit           1141  169   79  0.064  0.030  0.041  0.482  0.073
-GUM_reddit_pandas              reddit            614   94   11  0.600  0.065  0.117  0.406  0.074
 GUM_speech_impeachment         speech           1101  152  173  0.273  0.311  0.291  0.314  0.439
 GUM_speech_inauguration        speech            885  104  136  0.615  0.806  0.697  0.278  0.563
 GUM_textbook_governments       textbook          945  112  134  0.609  0.730  0.664  0.306  0.509
@@ -41,7 +46,6 @@ conversation        2    0.789    0.220    0.666    0.679    0.935     0.787
 fiction             2    0.498    0.399    0.454    0.412    0.695     0.517
 interview           2    0.565    0.282    0.523    0.445    0.559     0.495
 news                2    0.639    0.316    0.515    0.557    0.765     0.645
-reddit              2    0.079    0.444    0.073    0.144    0.049     0.074
 speech              2    0.494    0.296    0.501    0.427    0.516     0.467
 textbook            2    0.516    0.360    0.399    0.485    0.609     0.540
 vlog                2    0.633    0.397    0.505    0.520    0.810     0.633
@@ -50,12 +54,12 @@ whow                2    0.765    0.219    0.663    0.663    0.859     0.748
 
 ## Corpus-level aggregate (all documents pooled)
 
-macro mean F1 (unweighted mean over 24 docs): 0.5653
-macro mean WindowDiff: 0.3130
-macro mean Boundary Similarity: 0.4841
+macro mean F1 (unweighted mean over 22 docs): 0.6095
+macro mean WindowDiff: 0.3012
+macro mean Boundary Similarity: 0.5215
 
 micro-averaged boundary P/R/F1 (DISRPT's own scoring methodology, seg_eval.py):
-  precision=0.5335  recall=0.6484  f1=0.5853
+  precision=0.5441  recall=0.7107  f1=0.6163
 
 ## Comparison against published DISRPT 2023 baseline (eng.rst.gum, Plain track, DisCut*)
 
@@ -63,4 +67,4 @@ Caveat: the published score is a fine-tuned system evaluated on the *test* parti
 
                       precision     recall         f1
 DISRPT 2023 DisCut*       94.95      93.98      94.46
-this pipeline (dev)       53.35      64.84      58.53
+this pipeline (dev)       54.41      71.07      61.63
