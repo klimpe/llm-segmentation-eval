@@ -1,8 +1,10 @@
 import pytest
 
 from llm_segmenter import (
+    build_fewshot_prompt,
     build_prompt,
     indices_to_masses,
+    masses_to_indices,
     parse_boundary_indices,
     segment_document,
 )
@@ -29,6 +31,7 @@ class StubClient:
 
     def create(self, **kwargs):
         self.call_count += 1
+        self.last_kwargs = kwargs
         return _Response(self.reply_text)
 
 
@@ -37,6 +40,27 @@ def test_build_prompt_numbers_tokens_from_one():
     assert "1\tHello" in prompt
     assert "2\tworld" in prompt
     assert "3\t." in prompt
+
+
+def test_build_fewshot_prompt_includes_examples_and_target():
+    examples = [(["Foo", "bar", "."], [1, 3]), (["Baz", "qux"], [1])]
+    prompt = build_fewshot_prompt(["Hello", "world", "."], examples)
+
+    assert "Example 1:" in prompt
+    assert "1\tFoo" in prompt
+    assert "3\t." in prompt
+    assert "Correct EDU-start positions: [1, 3]" in prompt
+    assert "Example 2:" in prompt
+    assert "1\tBaz" in prompt
+    assert "Correct EDU-start positions: [1]" in prompt
+    # the target document itself still appears, same as zero-shot
+    assert "1\tHello" in prompt
+    assert "2\tworld" in prompt
+
+
+def test_build_fewshot_prompt_with_no_examples_still_has_target():
+    prompt = build_fewshot_prompt(["Hello"], [])
+    assert "1\tHello" in prompt
 
 
 def test_parse_boundary_indices_plain_json():
@@ -55,6 +79,31 @@ def test_parse_boundary_indices_empty_array():
 def test_parse_boundary_indices_no_array_raises():
     with pytest.raises(ValueError, match="no JSON array"):
         parse_boundary_indices("I don't know how to segment this.")
+
+
+def test_parse_boundary_indices_tolerates_quoted_element():
+    # observed in practice: the model quoted the first element as a string
+    assert parse_boundary_indices('["1", 2, 36, 40]') == [1, 2, 36, 40]
+
+
+def test_parse_boundary_indices_wrapped_in_tags_multiline():
+    raw = "<answer>\n[1, 4,\n9]\n</answer>"
+    assert parse_boundary_indices(raw) == [1, 4, 9]
+
+
+def test_parse_boundary_indices_rejects_float():
+    with pytest.raises(ValueError, match="non-integer"):
+        parse_boundary_indices("[1, 4.5, 9]")
+
+
+def test_parse_boundary_indices_rejects_bool():
+    with pytest.raises(ValueError, match="non-integer"):
+        parse_boundary_indices("[1, true, 9]")
+
+
+def test_parse_boundary_indices_rejects_non_numeric_string():
+    with pytest.raises(ValueError, match="non-integer"):
+        parse_boundary_indices('[1, "four", 9]')
 
 
 def test_indices_to_masses_matches_docstring_example():
@@ -79,6 +128,33 @@ def test_indices_to_masses_out_of_range_raises():
 def test_indices_to_masses_sum_matches_n_tokens():
     masses = indices_to_masses([1, 5, 5, 8], 10)  # duplicate index tolerated
     assert sum(masses) == 10
+
+
+def test_masses_to_indices_matches_docstring_example():
+    assert masses_to_indices([3, 4, 3]) == [1, 4, 8]
+
+
+def test_masses_to_indices_round_trips_with_indices_to_masses():
+    masses = [3, 4, 3]
+    n_tokens = sum(masses)
+    indices = masses_to_indices(masses)
+    assert indices_to_masses(indices, n_tokens) == masses
+
+
+def test_segment_document_uses_custom_prompt_builder(tmp_path):
+    tokens = ["a"] * 10
+    ref_masses = [3, 4, 3]
+    client = StubClient("[1, 4, 8]")
+    seen_prompts = []
+
+    def recording_builder(toks):
+        seen_prompts.append(toks)
+        return "CUSTOM PROMPT MARKER"
+
+    segment_document(tokens, ref_masses, "doc1", tmp_path, client=client, prompt_builder=recording_builder)
+
+    assert seen_prompts == [tokens]
+    assert client.last_kwargs["messages"][0]["content"] == "CUSTOM PROMPT MARKER"
 
 
 def test_segment_document_persists_and_parses(tmp_path):

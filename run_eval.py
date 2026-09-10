@@ -51,9 +51,15 @@ def genre_of(doc_id: str) -> str:
     return doc_id.split("_")[1]
 
 
-def main():
-    all_docs = list(iter_tok_documents(CORPUS_PATH))
+def load_eligible_documents(corpus_path: str):
+    """Read every document from corpus_path and flag masked-text ones.
 
+    Returns (all_docs, docs, excluded, masking_rows): `docs` excludes any
+    document over MASKING_EXCLUSION_THRESHOLD masked tokens, `excluded` is
+    the (doc_id, masked_fraction) pairs left out, `masking_rows` covers
+    every document (for the audit, not just the excluded ones).
+    """
+    all_docs = list(iter_tok_documents(corpus_path))
     masking_rows = []
     docs = []
     excluded = []
@@ -64,18 +70,23 @@ def main():
             excluded.append((doc_id, frac))
         else:
             docs.append((doc_id, tokens, ref_masses))
+    return all_docs, docs, excluded, masking_rows
 
-    print(
-        f"Loaded {len(all_docs)} documents from {CORPUS_PATH}, excluded {len(excluded)} "
-        f"(masked-token fraction > {MASKING_EXCLUSION_THRESHOLD})\n"
-    )
 
+def evaluate_documents(docs, output_dir, prompt_builder=None):
+    """Run segment_document over docs (list of (doc_id, tokens, ref_masses)),
+    scoring each with the metrics module. Returns (rows, failures).
+
+    prompt_builder is passed through to segment_document when given (e.g. a
+    few-shot variant); omit it to use the default zero-shot prompt.
+    """
     rows = []
     failures = []
 
     for doc_id, tokens, ref_masses in docs:
         try:
-            hyp_masses = segment_document(tokens, ref_masses, doc_id, LLM_OUTPUT_DIR)
+            kwargs = {} if prompt_builder is None else {"prompt_builder": prompt_builder}
+            hyp_masses = segment_document(tokens, ref_masses, doc_id, output_dir, **kwargs)
         except ValueError as e:
             failures.append((doc_id, str(e)))
             continue
@@ -97,6 +108,19 @@ def main():
                 "hyp_masses": hyp_masses,
             }
         )
+
+    return rows, failures
+
+
+def main():
+    all_docs, docs, excluded, masking_rows = load_eligible_documents(CORPUS_PATH)
+
+    print(
+        f"Loaded {len(all_docs)} documents from {CORPUS_PATH}, excluded {len(excluded)} "
+        f"(masked-token fraction > {MASKING_EXCLUSION_THRESHOLD})\n"
+    )
+
+    rows, failures = evaluate_documents(docs, LLM_OUTPUT_DIR)
 
     lines = []
 
