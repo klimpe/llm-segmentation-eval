@@ -4,10 +4,16 @@
 
 ## Excluded documents (not sent to the model, not counted anywhere below)
 
-Reason: Reddit text is masked (underscored) in the open GUM distribution, not real text.
+Reason: more than 50% of tokens match ^_+$ -- text is masked in the open corpus distribution, not real. Detected from the data, not by genre name.
 
-- GUM_reddit_macroeconomics
-- GUM_reddit_pandas
+- GUM_reddit_macroeconomics: 97.5% masked
+- GUM_reddit_pandas: 96.7% masked
+
+## Masked-token audit (^_+$), all documents, before exclusion
+
+- GUM_reddit_macroeconomics: 97.5% of 1141 tokens masked [EXCLUDED]
+- GUM_reddit_pandas: 96.7% of 614 tokens masked [EXCLUDED]
+(22 of 24 documents have 0% masked tokens; full per-document figures in eng.rst.gum_dev_masking.csv.)
 
 ## Per-document results
 

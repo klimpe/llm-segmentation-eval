@@ -1,3 +1,3 @@
-doc_id,reason
-GUM_reddit_macroeconomics,"Reddit text is masked (underscored) in the open GUM distribution, not real text"
-GUM_reddit_pandas,"Reddit text is masked (underscored) in the open GUM distribution, not real text"
+doc_id,masked_fraction,reason
+GUM_reddit_macroeconomics,0.9754601226993865,masked-token fraction 97.5% exceeds threshold 50%
+GUM_reddit_pandas,0.9674267100977199,masked-token fraction 96.7% exceeds threshold 50%

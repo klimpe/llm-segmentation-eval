@@ -4,6 +4,7 @@ and compare against the published DISRPT 2023 system score.
 Run with: python3 run_eval.py
 """
 import csv
+import re
 from pathlib import Path
 
 from disrpt_reader import iter_tok_documents
@@ -26,14 +27,23 @@ LLM_OUTPUT_DIR = Path("llm_output")
 # while everything here runs on the *dev* split (the only one downloaded).
 DISRPT_2023_GUM_PLAIN_BASELINE = {"precision": 94.95, "recall": 93.98, "f1": 94.46}
 
-# The Reddit genre's text is masked in the open distribution of GUM (each
-# token replaced by underscores of the same length, e.g. "______"); the real
-# text requires utils/process_underscores.py plus a live Reddit fetch, which
-# we do not have. Segmenting underscore placeholders is not a real test of
-# the model and produced a striking outlier (F1 0.074) for exactly that
-# reason -- excluded here rather than silently left in an aggregate.
-EXCLUDED_DOC_ID_PREFIX = "GUM_reddit"
-EXCLUDED_REASON = "Reddit text is masked (underscored) in the open GUM distribution, not real text"
+# Some GUM source genres (Reddit, so far) have text redistribution
+# restrictions, so the open corpus masks each token as underscores of the
+# same length (e.g. "______" for a 6-letter word) instead of the real text;
+# reconstructing it needs utils/process_underscores.py plus a live re-fetch,
+# which we don't have. Segmenting placeholder text isn't a real test of the
+# model -- it produced a striking outlier (F1 0.074) the first time it slipped
+# through. Detected directly from the data (masked-token fraction) rather
+# than by genre name, so any other partially-masked source is caught the
+# same way instead of silently distorting the numbers.
+MASKED_TOKEN_RE = re.compile(r"^_+$")
+MASKING_EXCLUSION_THRESHOLD = 0.5  # exclude a document if more than half its tokens are masked
+
+
+def masked_token_fraction(tokens: list[str]) -> float:
+    if not tokens:
+        return 0.0
+    return sum(1 for t in tokens if MASKED_TOKEN_RE.match(t)) / len(tokens)
 
 
 def genre_of(doc_id: str) -> str:
@@ -43,9 +53,22 @@ def genre_of(doc_id: str) -> str:
 
 def main():
     all_docs = list(iter_tok_documents(CORPUS_PATH))
-    docs = [d for d in all_docs if not d[0].startswith(EXCLUDED_DOC_ID_PREFIX)]
-    excluded = [d[0] for d in all_docs if d[0].startswith(EXCLUDED_DOC_ID_PREFIX)]
-    print(f"Loaded {len(all_docs)} documents from {CORPUS_PATH}, excluded {len(excluded)} ({EXCLUDED_DOC_ID_PREFIX}*)\n")
+
+    masking_rows = []
+    docs = []
+    excluded = []
+    for doc_id, tokens, ref_masses in all_docs:
+        frac = masked_token_fraction(tokens)
+        masking_rows.append({"doc_id": doc_id, "n_tokens": len(tokens), "masked_fraction": frac})
+        if frac > MASKING_EXCLUSION_THRESHOLD:
+            excluded.append((doc_id, frac))
+        else:
+            docs.append((doc_id, tokens, ref_masses))
+
+    print(
+        f"Loaded {len(all_docs)} documents from {CORPUS_PATH}, excluded {len(excluded)} "
+        f"(masked-token fraction > {MASKING_EXCLUSION_THRESHOLD})\n"
+    )
 
     rows = []
     failures = []
@@ -92,11 +115,29 @@ def main():
     if excluded:
         emit("## Excluded documents (not sent to the model, not counted anywhere below)")
         emit()
-        emit(f"Reason: {EXCLUDED_REASON}.")
+        emit(
+            f"Reason: more than {MASKING_EXCLUSION_THRESHOLD:.0%} of tokens match ^_+$ -- text is "
+            "masked in the open corpus distribution, not real. Detected from the data, not by genre name."
+        )
         emit()
-        for doc_id in excluded:
-            emit(f"- {doc_id}")
+        for doc_id, frac in excluded:
+            emit(f"- {doc_id}: {frac:.1%} masked")
         emit()
+
+    emit("## Masked-token audit (^_+$), all documents, before exclusion")
+    emit()
+    nonzero_masking = [r for r in masking_rows if r["masked_fraction"] > 0]
+    if nonzero_masking:
+        for r in sorted(nonzero_masking, key=lambda r: -r["masked_fraction"]):
+            flag = " [EXCLUDED]" if r["masked_fraction"] > MASKING_EXCLUSION_THRESHOLD else ""
+            emit(f"- {r['doc_id']}: {r['masked_fraction']:.1%} of {r['n_tokens']} tokens masked{flag}")
+    else:
+        emit("No documents have any masked tokens.")
+    emit(
+        f"({len(masking_rows) - len(nonzero_masking)} of {len(masking_rows)} documents have 0% masked tokens; "
+        "full per-document figures in eng.rst.gum_dev_masking.csv.)"
+    )
+    emit()
 
     if failures:
         emit("## Alignment failures (excluded from all metrics below)")
@@ -184,12 +225,34 @@ def main():
     Path("results/eng.rst.gum_dev.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     write_csvs(
-        results_dir, rows, failures, excluded, genre_rows_out, macro_f1, macro_wd, macro_bs, micro_p, micro_r, micro_f1
+        results_dir,
+        rows,
+        failures,
+        excluded,
+        masking_rows,
+        genre_rows_out,
+        macro_f1,
+        macro_wd,
+        macro_bs,
+        micro_p,
+        micro_r,
+        micro_f1,
     )
 
 
 def write_csvs(
-    results_dir, rows, failures, excluded, genre_rows, macro_f1, macro_wd, macro_bs, micro_p, micro_r, micro_f1
+    results_dir,
+    rows,
+    failures,
+    excluded,
+    masking_rows,
+    genre_rows,
+    macro_f1,
+    macro_wd,
+    macro_bs,
+    micro_p,
+    micro_r,
+    micro_f1,
 ):
     doc_fields = [
         "doc_id",
@@ -215,8 +278,16 @@ def write_csvs(
 
     with open(results_dir / "eng.rst.gum_dev_excluded.csv", "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["doc_id", "reason"])
-        writer.writerows((doc_id, EXCLUDED_REASON) for doc_id in excluded)
+        writer.writerow(["doc_id", "masked_fraction", "reason"])
+        writer.writerows(
+            (doc_id, frac, f"masked-token fraction {frac:.1%} exceeds threshold {MASKING_EXCLUSION_THRESHOLD:.0%}")
+            for doc_id, frac in excluded
+        )
+
+    with open(results_dir / "eng.rst.gum_dev_masking.csv", "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=["doc_id", "n_tokens", "masked_fraction"])
+        writer.writeheader()
+        writer.writerows(masking_rows)
 
     genre_fields = [
         "genre",
