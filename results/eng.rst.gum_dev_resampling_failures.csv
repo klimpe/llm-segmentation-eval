@@ -1,0 +1,5 @@
+group,doc_id,genre,condition,sample,reason
+decline,GUM_academic_exposure,academic,few-shot,4,no JSON array of indices found in model output
+gain,GUM_whow_joke,whow,few-shot,1,"malformed JSON array in model output: Expecting ',' delimiter: line 1 column 374 (char 373)"
+gain,GUM_bio_byron,bio,few-shot,1,"malformed JSON array in model output: Expecting ',' delimiter: line 1 column 557 (char 556)"
+gain,GUM_textbook_governments,textbook,zero-shot,3,"malformed JSON array in model output: Expecting ',' delimiter: line 1 column 674 (char 673)"

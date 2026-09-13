@@ -60,15 +60,28 @@ depressing a genre's scores.
 thinking explicitly disabled (`thinking={"type": "disabled"}`) — see §5 for why.
 
 **Sampling.** Temperature, `top_p` and `top_k` were left unset for all runs
-reported here, meaning every call used the API default temperature of 1.0, with
-no seed. Because responses are cached to disk and reused, **each document was
-sampled exactly once** in each condition, and run-to-run variance has not been
-measured. Every figure in this report is therefore a single stochastic draw.
-See §6 for what this does and does not undermine.
+reported here. Because responses are cached to disk and reused, **each
+document was sampled exactly once** in each condition for the main results in
+§4.1-§4.4, and run-to-run variance was not measured there. Every corpus/genre
+figure in those sections is therefore built from single draws. See §6 for what
+this does and does not undermine.
 
-Sampling was subsequently fixed to `temperature=0` for reproducibility, but this
-does not retroactively affect the cached responses analysed here; reproducing
-any finding below requires clearing the relevant cache files and re-running.
+An attempt was made to fix sampling at `temperature=0` for reproducibility.
+This is not possible: the installed SDK (`anthropic` 1.4.0, matching the
+Claude 5 model family) exposes no `temperature`, `top_p`, or `top_k` parameter
+on `messages.create()` at all — confirmed by inspecting the method's actual
+signature and grepping the installed package for any trace of the word.
+Passing `temperature` raises `TypeError` immediately, which is how this was
+caught (an earlier commit that added it went untested against a real,
+non-cached call and shipped broken). Sampling control on this API has
+apparently moved to `output_config` (currently just `effort` and `format`),
+with nothing equivalent to a raw sampling-temperature knob. So there is no
+"default temperature of 1.0" to report either — that would assume a specific
+numeric value that cannot be confirmed or set through this client.
+
+Since sampling cannot be pinned, variance is measured by repetition instead:
+§4.6 resamples 8 of the 22 documents 5 times each, under whatever default
+(uncontrolled) sampling the API applies, and reports the spread.
 
 **Run date.** 08.09.2026.
 
@@ -258,9 +271,13 @@ Median delta across the 21 documents is −0.035, mean −0.052.
 So the accurate statement is narrower than the corpus figure suggests:
 few-shot prompting harms a subset of documents substantially and helps another
 subset moderately, and the aggregate is negative. What distinguishes the two
-subsets is not established here. Since each document was sampled once at
-temperature 1.0 (§2), part of the spread may be sampling variance rather than a
-property of the documents; the two cannot be separated without resampling.
+subsets is not established here. Since each document was sampled once under
+default, uncontrolled sampling (§2), part of the spread may be sampling
+variance rather than a property of the documents. **This is now partly
+resolved — see §4.6:** the resampling test finds the "helped" subset
+replicates in direction on all 4 documents tested, while the "harmed" subset
+only partly replicates (2 of 4 tested documents keep a real decline; 2 show it
+was mostly noise).
 
 **Interpretation.** The gap is not primarily attributable to ignorance of the
 annotation convention. Examples move the model's threshold for proposing a
@@ -359,12 +376,84 @@ structured output raises the risk of this degradation, and any pipeline of this
 shape should check for runs of consecutive predicted boundaries rather than
 trusting the aggregate score.
 
-**Caveat.** Because this document, like every other, was sampled once at
-temperature 1.0, the collapse cannot presently be distinguished from a single
-unlucky draw. It may be a deterministic response to the heavier prompt on a long
-document, or a sampling artefact. Resolving this requires resampling the
-document several times, which has not been done. Whether the same collapse
-occurs on other long documents is likewise untested.
+**Resolved by resampling (§4.6): the collapse is real and recurring, not a
+single unlucky draw, but it is stochastic rather than deterministic.** Drawing
+5 independent few-shot samples of this document, 2 collapsed (trailing runs of
+160 and 115 tokens marked as boundaries) and 3 did not; across 5 independent
+zero-shot samples of the same document, none collapsed. So the few-shot prompt
+specifically raises the risk of this failure mode on this document — roughly a
+40% rate here, zero in the zero-shot condition — without making it certain.
+One consequence: on the 3 few-shot samples that didn't collapse, precision
+(0.52-0.73) was competitive with or better than zero-shot's mean (0.63) on
+this same document. The large negative delta originally reported for
+`GUM_conversation_grounded` was therefore driven almost entirely by the two
+collapsed draws, not by a general degradation in segmentation judgment on this
+text. Whether the same collapse occurs on other long documents, and whether
+40% is representative or specific to this document's length/register, is
+still untested.
+
+### 4.6 Resampling test: is the harmed/helped split real, or noise?
+
+Deferred sampling-temperature control (§2) forced a different design than
+originally planned in an earlier draft of §7: instead of comparing
+`temperature=0` against `temperature=1.0` on resampled documents, this draws 5
+independent samples per document per condition under whatever default,
+uncontrolled sampling the API applies — variance is measured by repetition,
+not eliminated by pinning.
+
+**Documents.** The 4 with the largest few-shot precision decline
+(`GUM_interview_gaming`, `GUM_conversation_grounded`, `GUM_academic_exposure`,
+`GUM_voyage_coron`) and the 4 with the largest gain (`GUM_fiction_beast`,
+`GUM_whow_joke`, `GUM_bio_byron`, `GUM_textbook_governments`), from the §4.4
+per-document table. Sample 0 in each condition reuses the single cached run
+already analysed above; samples 1-4 are fresh, independent calls. 4 of the 80
+attempted fresh-plus-cached samples failed to parse (malformed JSON, a missing
+comma) and are excluded, not silently dropped — a real ~5% base failure rate
+that a single draw per document could not surface. Full detail in
+`results/eng.rst.gum_dev_resampling_per_sample.csv` and `..._summary.csv`;
+failures in `..._resampling_failures.csv`.
+
+Precision, mean across samples with [min-max] range:
+
+| doc_id | genre | zero-shot | few-shot | original single-draw delta |
+|---|---|---|---|---|
+| GUM_interview_gaming | interview | 0.593 [0.458-0.941] | 0.463 [0.387-0.521] | −0.420 |
+| GUM_conversation_grounded | conversation | 0.630 [0.573-0.657] | 0.532 [0.372-0.726] | −0.264 |
+| GUM_academic_exposure | academic | 0.558 [0.395-0.808] | 0.535 [0.455-0.586] | −0.259 |
+| GUM_voyage_coron | voyage | 0.746 [0.629-0.978] | 0.757 [0.690-0.870] | −0.198 |
+| GUM_fiction_beast | fiction | 0.512 [0.366-0.619] | 0.573 [0.512-0.665] | +0.199 |
+| GUM_whow_joke | whow | 0.650 [0.513-0.735] | 0.697 [0.636-0.748] | +0.142 |
+| GUM_bio_byron | bio | 0.553 [0.480-0.622] | 0.665 [0.587-0.705] | +0.097 |
+| GUM_textbook_governments | textbook | 0.607 [0.578-0.643] | 0.662 [0.603-0.696] | +0.087 |
+
+**The gain side replicates; the decline side only half does.**
+
+- All 4 "gain" documents keep the same sign under resampling, usually at a
+  smaller magnitude than the single-draw delta (e.g. `GUM_bio_byron`'s mean
+  gain is +0.112, close to the original +0.097, and its ranges barely
+  overlap — the most robust effect of the eight). Few-shot helping these four
+  written, non-dialogue genres looks like a real, if modest, effect rather
+  than noise.
+- 2 of 4 "decline" documents mostly evaporate: `GUM_academic_exposure`'s means
+  converge (0.558 vs 0.535) inside heavily overlapping ranges, and
+  `GUM_voyage_coron`'s reverses sign entirely (0.746 vs 0.757). Both original
+  deltas were driven largely by an unusually high single zero-shot draw
+  (0.808 and 0.978 respectively sit at the top of each range), not by
+  few-shot doing something wrong.
+- `GUM_interview_gaming` keeps a real, consistent decline (0.593 vs 0.463
+  mean), though smaller than the original −0.420 — the single zero-shot draw
+  of 0.941 was itself the high outlier in a wide [0.458-0.941] range.
+- `GUM_conversation_grounded`'s decline is real on average but is explained
+  by §4.5's collapse, not a general precision loss: see there.
+
+**Reading for the corpus-level result (§4.4).** This does not overturn the
+corpus-level few-shot precision drop, which pools far more boundary decisions
+than 8 resampled documents can speak to. What it changes is the
+document-level narrative: roughly half of the specific documents flagged as
+"harmed" in the original single-draw table were not reliably harmed, while
+the "helped" documents were reliably helped. The corpus aggregate's negative
+sign is not in question here; which documents are responsible for it is
+better supported for some than others.
 
 ---
 
@@ -410,13 +499,18 @@ error. All produced a number.
 
 ## 6. Limitations
 
-- **Single sample per document at temperature 1.0.** Every number here rests on
-  one stochastic draw, with no measurement of run-to-run variance. The
-  corpus-level micro-averages pool thousands of boundary decisions across 22
-  documents and are correspondingly less sensitive to any individual draw; the
-  per-document and per-genre observations are considerably less stable and
-  should be read as indicative. The generation collapse in §4.5 is the clearest
-  case where sampling and effect cannot currently be separated.
+- **Single sample per document under default, uncontrolled sampling, for 14 of
+  22 documents.** The corpus-level and per-genre figures in §4.1-§4.4 pool
+  thousands of boundary decisions across 22 documents and are correspondingly
+  less sensitive to any individual draw. §4.6 resampled the 8 documents with
+  the largest per-document deltas 5 times each and found roughly half of the
+  flagged "harmed" documents (2 of 4) did not reliably replicate, while all 4
+  "helped" documents did — so per-document readings for the other 14
+  documents, never resampled, should still be treated as indicative rather
+  than established.
+- Sampling cannot be pinned at all through this API/SDK (§2) — there is no
+  `temperature=0` available to make any of this reproducible byte-for-byte.
+  Only repetition (§4.6) characterizes variance; it does not eliminate it.
 - Evaluated on the development split; the test split is deliberately unused.
 - A single model, single prompt formulation, single corpus.
 - Written text only. No claim about spoken language is made or supported here.
@@ -436,17 +530,21 @@ The same pipeline, different data. Two questions: does performance drop on
 spoken transcripts relative to written text, and does the few-shot penalty
 observed in the `conversation` genre reproduce on a larger spoken sample.
 
-**Resampling test, deferred but cheap.** The clearest way to separate mechanism
-from sampling noise is to take the three or four documents with the largest
-precision declines and the three or four with the largest gains, and run each
-five times at `temperature=0` and at 1.0. If the split between harmed and helped
-documents survives, it is a property of the texts; if it does not, the observed
-spread is variance. This is roughly a dozen documents and has not been done.
+**Resampling test — done, see §4.6.** The 4 documents with the largest
+few-shot precision decline and the 4 with the largest gain were each resampled
+5 times under default (uncontrolled) sampling, since `temperature` cannot be
+pinned through this API/SDK. Result: the "helped" side replicates in direction
+on all 4 documents; the "harmed" side only partly does (2 of 4 hold up,
+`GUM_interview_gaming` and, via the collapse mechanism, `GUM_conversation_grounded`;
+2 of 4 — `GUM_academic_exposure`, `GUM_voyage_coron` — were mostly a single
+lucky/unlucky draw). The remaining 14 documents were never resampled and this
+should not be assumed to generalize to them.
 
-Phase 2 runs at `temperature=0`, so its figures will be reproducible. Any
-direct comparison against phase 1 numbers must note that the latter were sampled
-at temperature 1.0; re-running phase 1 deterministically would require clearing
-the caches and is worth doing if the comparison becomes load-bearing.
+Phase 2 cannot run at a pinned temperature either, for the same reason (§2).
+Any comparison against phase 1 numbers should treat both as single- or
+few-sample draws under uncontrolled sampling, not as reproducible baselines —
+resampling, not pinning, is the available tool for characterizing variance in
+either phase.
 
 An open question deferred from phase 1: whether swapping one worked example for
 a spontaneous-dialogue excerpt closes the conversation-genre precision gap. If

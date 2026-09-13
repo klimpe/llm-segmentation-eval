@@ -89,9 +89,7 @@ def _default_client() -> Anthropic:
     return Anthropic(default_headers={"accept-encoding": "gzip, deflate"})
 
 
-def call_model(
-    prompt: str, model: str = DEFAULT_MODEL, client: Anthropic | None = None, temperature: float = 0
-) -> str:
+def call_model(prompt: str, model: str = DEFAULT_MODEL, client: Anthropic | None = None) -> str:
     client = client or _default_client()
     response = client.messages.create(
         model=model,
@@ -103,7 +101,14 @@ def call_model(
         # alignment failure for every such document. Disabling it fixes
         # this and is cheaper.
         thinking={"type": "disabled"},
-        temperature=temperature,
+        # No temperature/top_p/top_k here: this SDK's Messages.create() (the
+        # anthropic package pinned in this environment, matching the Claude 5
+        # model family) has no such parameter at all -- confirmed by
+        # inspecting its signature and grepping the installed package.
+        # Passing temperature raises TypeError immediately. Sampling is not
+        # controllable through this API; see llm_segmenter.segment_document's
+        # n_samples for how variance is handled instead (repetition, not
+        # pinning).
         messages=[{"role": "user", "content": prompt}],
     )
     return "".join(block.text for block in response.content if block.type == "text")
@@ -164,6 +169,14 @@ def masses_to_indices(masses: list[int]) -> list[int]:
     return [1] + sorted(b + 1 for b in masses_to_boundaries(masses))
 
 
+def _sample_path(output_dir: Path, doc_id: str, sample_idx: int) -> Path:
+    # Sample 0 keeps the original {doc_id}.txt path so every cache file
+    # written before n_samples existed is still a valid sample-0 cache hit.
+    if sample_idx == 0:
+        return output_dir / f"{doc_id}.txt"
+    return output_dir / f"{doc_id}_sample{sample_idx}.txt"
+
+
 def segment_document(
     tokens: list[str],
     ref_masses: list[int],
@@ -172,13 +185,14 @@ def segment_document(
     model: str = DEFAULT_MODEL,
     client: Anthropic | None = None,
     prompt_builder=build_prompt,
-) -> list[int]:
-    """Prompt the model to segment `tokens`, caching and persisting the raw
-    response under output_dir/{doc_id}.txt (one file per document; reused on
-    a later call instead of re-querying). Parses the response into masses and
-    verifies they cover the same number of tokens as ref_masses. Raises
-    ValueError on any parse or alignment failure -- callers must catch this,
-    set the document aside, and report it, never compute a metric on it.
+    n_samples: int = 1,
+):
+    """Prompt the model to segment `tokens`, caching and persisting each raw
+    response under output_dir (one file per sample; reused on a later call
+    instead of re-querying). Parses each response into masses and verifies it
+    covers the same number of tokens as ref_masses. Raises ValueError on any
+    parse or alignment failure -- callers must catch this, set the document
+    aside, and report it, never compute a metric on it.
 
     A cached file that turns out to be empty or otherwise unusable (e.g. a
     response truncated mid-JSON) is not treated as a valid cache hit: it is
@@ -187,22 +201,54 @@ def segment_document(
     prompt_builder defaults to the zero-shot build_prompt; pass e.g.
     functools.partial(build_fewshot_prompt, examples=...) for a few-shot
     variant. Use a separate output_dir per prompt variant so caches don't mix.
+
+    n_samples controls how many independent samples to draw, each cached
+    separately (see _sample_path) so a document already processed at
+    n_samples=1 doesn't need re-querying when later resampled -- only the
+    additional samples are fresh calls. Sampling itself cannot be pinned
+    (this API exposes no temperature/top_p/top_k), so repeated samples are
+    the only way to see run-to-run variance, not a way to average it away.
+
+    With the default n_samples=1, returns hyp_masses for that one sample
+    (unchanged behavior; a parse/alignment failure raises ValueError, as
+    before). With n_samples > 1, returns (hyp_masses_list, failures):
+    hyp_masses_list holds only the samples that parsed and aligned
+    successfully (0 to n_samples of them), and failures is a list of
+    (sample_idx, reason) for the rest -- one bad sample must not lose the
+    others, and must not be silently dropped either, matching how
+    evaluate_documents reports (rows, failures) for whole documents.
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    raw_path = output_dir / f"{doc_id}.txt"
+    prompt = None  # built lazily, only once, only if a fresh call is needed
 
-    if raw_path.exists():
-        cached_output = raw_path.read_text(encoding="utf-8")
+    def _one_sample(sample_idx: int) -> list[int]:
+        nonlocal prompt
+        raw_path = _sample_path(output_dir, doc_id, sample_idx)
+        if raw_path.exists():
+            cached_output = raw_path.read_text(encoding="utf-8")
+            try:
+                return _parse_and_align(cached_output, ref_masses, tokens)
+            except ValueError:
+                pass  # cached response is unusable; fall through to a fresh call
+
+        if prompt is None:
+            prompt = prompt_builder(tokens)
+        raw_output = call_model(prompt, model=model, client=client)
+        raw_path.write_text(raw_output, encoding="utf-8")
+        return _parse_and_align(raw_output, ref_masses, tokens)
+
+    if n_samples == 1:
+        return _one_sample(0)
+
+    results = []
+    failures = []
+    for i in range(n_samples):
         try:
-            return _parse_and_align(cached_output, ref_masses, tokens)
-        except ValueError:
-            pass  # cached response is unusable; fall through to a fresh call
-
-    prompt = prompt_builder(tokens)
-    raw_output = call_model(prompt, model=model, client=client)
-    raw_path.write_text(raw_output, encoding="utf-8")
-    return _parse_and_align(raw_output, ref_masses, tokens)
+            results.append(_one_sample(i))
+        except ValueError as e:
+            failures.append((i, str(e)))
+    return results, failures
 
 
 def _parse_and_align(raw_output: str, ref_masses: list[int], tokens: list[str]) -> list[int]:
