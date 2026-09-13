@@ -175,6 +175,40 @@ def main():
         )
     emit()
 
+    # Segment-count ratio (hyp_segs / ref_segs): how much each condition
+    # over- or under-segments relative to the reference, independent of
+    # whether predicted boundaries land in the right place. A ratio above 1
+    # means more segments than the reference (over-segmentation).
+    segment_ratio_rows = []
+    for doc_id in common_ids:
+        z, f = zero_by_doc[doc_id], few_by_doc[doc_id]
+        ref_segs = z["ref_segs"]
+        segment_ratio_rows.append(
+            {
+                "doc_id": doc_id,
+                "genre": z["genre"],
+                "ref_segs": ref_segs,
+                "zeroshot_hyp_segs": z["hyp_segs"],
+                "fewshot_hyp_segs": f["hyp_segs"],
+                "zeroshot_ratio": z["hyp_segs"] / ref_segs,
+                "fewshot_ratio": f["hyp_segs"] / ref_segs,
+            }
+        )
+    total_ref = sum(r["ref_segs"] for r in segment_ratio_rows)
+    total_zero_hyp = sum(r["zeroshot_hyp_segs"] for r in segment_ratio_rows)
+    total_few_hyp = sum(r["fewshot_hyp_segs"] for r in segment_ratio_rows)
+    segment_ratio_rows.append(
+        {
+            "doc_id": "TOTAL",
+            "genre": "",
+            "ref_segs": total_ref,
+            "zeroshot_hyp_segs": total_zero_hyp,
+            "fewshot_hyp_segs": total_few_hyp,
+            "zeroshot_ratio": total_zero_hyp / total_ref,
+            "fewshot_ratio": total_few_hyp / total_ref,
+        }
+    )
+
     zero_genre = aggregate_by_genre(zero_rows_common)
     few_genre = aggregate_by_genre(few_rows_common)
 
@@ -245,6 +279,13 @@ def main():
         writer = csv.DictWriter(f, fieldnames=list(doc_comparison_rows[0].keys()))
         writer.writeheader()
         writer.writerows(doc_comparison_rows)
+
+    with open(
+        results_dir / "eng.rst.gum_dev_zero_vs_fewshot_segment_ratios.csv", "w", newline="", encoding="utf-8"
+    ) as f:
+        writer = csv.DictWriter(f, fieldnames=list(segment_ratio_rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(segment_ratio_rows)
 
     with open(
         results_dir / "eng.rst.gum_dev_zero_vs_fewshot_per_genre.csv", "w", newline="", encoding="utf-8"

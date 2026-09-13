@@ -89,7 +89,9 @@ def _default_client() -> Anthropic:
     return Anthropic(default_headers={"accept-encoding": "gzip, deflate"})
 
 
-def call_model(prompt: str, model: str = DEFAULT_MODEL, client: Anthropic | None = None) -> str:
+def call_model(
+    prompt: str, model: str = DEFAULT_MODEL, client: Anthropic | None = None, temperature: float = 0
+) -> str:
     client = client or _default_client()
     response = client.messages.create(
         model=model,
@@ -101,6 +103,7 @@ def call_model(prompt: str, model: str = DEFAULT_MODEL, client: Anthropic | None
         # alignment failure for every such document. Disabling it fixes
         # this and is cheaper.
         thinking={"type": "disabled"},
+        temperature=temperature,
         messages=[{"role": "user", "content": prompt}],
     )
     return "".join(block.text for block in response.content if block.type == "text")
