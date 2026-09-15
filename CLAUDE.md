@@ -21,29 +21,41 @@ detail is wrong.
 
 ## What I'm building
 
-A pipeline that has an LLM segment transcripts into discourse units, measures
-the gap against human annotation with standard segmentation metrics, and —
-this is the point of the project — relates that score to inter-annotator
-agreement. Most evaluations of this kind publish a score with no human ceiling,
-which makes the number uninterpretable: you cannot tell whether the model is
-far from human performance or already at the ceiling.
+A pipeline that has an LLM segment transcripts, measures the gap against human
+annotation with standard segmentation metrics, and — this is the point of the
+project — relates that score to inter-annotator agreement. Most evaluations of
+this kind publish a score with no human ceiling, which makes the number
+uninterpretable: you cannot tell whether the model is far from human
+performance or already at the ceiling.
 
 Three phases, in order:
 
-1. **DISRPT** (https://github.com/disrpt) — open, unified format across many
-   corpora, published system scores from the 2019/2021/2023/2025 shared tasks.
-   Text only, no audio. This phase is for building and validating the pipeline
-   and getting a baseline comparison against trained systems.
+1. **DISRPT** — open, unified format across many corpora, published system
+   scores from the 2019/2021/2023/2025 shared tasks. Text only, no audio. For
+   building and validating the pipeline and getting a baseline against trained
+   systems. **Completed** — see `reports/phase1.md`.
 
-2. **Santa Barbara Corpus (SBCSAE)** — free, ~20h of spontaneous conversational
-   American English, transcribed at the level of intonation units and
-   time-aligned to audio. This phase adds spoken data and makes prosodic
-   questions possible.
+2. **Santa Barbara Corpus (SBCSAE)** — free, ~249k words of spontaneous
+   conversational American English across 60 files, transcribed at the level of
+   intonation units and time-aligned at IU level. **Current phase.**
+
+   The corpus contains **no discourse segmentation** — intonation units are the
+   only human segmentation available. Phase 2 therefore measures something
+   different from phase 1, and the difference is substantive rather than
+   presentational: it asks **how far prosodic structure is recoverable from
+   text alone**. A human transcriber heard where an intonation contour ended;
+   the model sees only words. Agreement means prosodic phrasing is largely
+   predictable from lexis and syntax; disagreement means the signal carried
+   information the transcript does not. Every table and claim involving phase 2
+   figures must state that the target is prosodic, not discourse, units — not
+   once in a methods section, but wherever the numbers appear.
 
 3. **CID (Corpus of Interactional Data)** — spontaneous French conversation,
-   access pending from the LPL. Adds French, audio, and inter-annotator
-   agreement measures I computed myself during the doctorate. Data will NOT be
-   published; only code and aggregate results.
+   access pending from the LPL. Adds French, audio, discourse-unit annotation,
+   and inter-annotator agreement measures I computed myself during the
+   doctorate. It is the only phase where both unit types and a human ceiling
+   are available on the same data. Data will NOT be published; only code and
+   aggregate results.
 
 The hypothesis to test: the model fails specifically where prosodic
 information is decisive and absent from the transcript.
@@ -59,10 +71,6 @@ masses = [3, 4, 3]
 assert sum(masses) == n_tokens
 ```
 
-The atomic unit is a token in phases 1–2. It was a time interval in my old
-code; the metrics do not care, but scores are not comparable across different
-atomic units — this must be stated in any results table.
-
 Two functions define the contract:
 
 ```python
@@ -73,57 +81,222 @@ def masses_to_boundaries(masses: list[int]) -> set[int]:
     """Positions after which a boundary falls. len == len(masses) - 1."""
 ```
 
-Every reader (DISRPT, SBCSAE, LLM output) produces masses. Everything
+Every reader (DISRPT, SBCSAE, CID, LLM output) produces masses. Everything
 downstream consumes masses only.
 
-## Build order
+### Atomic units are not assumed
+
+The atomic unit is whatever the corpus's own annotation is defined over, and is
+fixed when its reader is written — not decided in advance. Phase 1 used the
+token, because DISRPT annotates per token. Phase 2 may not: if SBCSAE's only
+human segmentation is at the level of intonation units, then that is the unit,
+and what is being measured is prosodic rather than discourse segmentation. That
+is a substantive difference, not a formatting one, and must be established
+before the reader is written.
+
+Scores computed over different atomic units are **not comparable**: WindowDiff's
+window size derives from mean segment length in atomic units. Any table placing
+figures from different phases side by side must state this.
+
+## Phase 2 specifics (SBCSAE)
+
+### Source and licence
+
+Read `.trn`, not `.cha`: one line per intonation unit, tab-separated timestamp,
+speaker, text. Same information as CHAT with none of the convention layer.
+Download from UCSB directly (`SBCorpus.zip`, static files, no account) rather
+than TalkBank, which requires a login.
+
+Licence is CC Attribution-NoDerivatives 3.0 US — stricter than phase 1. Beyond
+the standing no-corpus-data-in-git rule, published output must not contain a
+re-tokenised or otherwise modified version of the transcript text. Scores,
+tables and short illustrative quotations are fine; a processed transcript file
+is not. Required citation: Du Bois, John W. (2000, 2003, 2005, 2005). Santa
+Barbara Corpus of Spoken American English, Parts 1–4. Philadelphia: Linguistic
+Data Consortium.
+
+### Reading the corpus — settled, see reports/phase2_data.md
+
+These were established by full-corpus inspection, not by sampling. Do not
+revisit them without new evidence.
+
+**Encodings.** Per-file, explicit, `errors="strict"`. `SBC060` is cp1252 (147
+curly apostrophes inside contractions); `SBC037` is latin-1 (34 Spanish
+accented vowels); everything else UTF-8. `newline=None` handles SBC037's CRLF.
+A decode failure must raise, never substitute — `errors="replace"` turns a
+problem into plausible data, which is the failure mode this project exists to
+avoid.
+
+**NUL bytes.** Six, in SBC015, SBC016, SBC018, SBC020, SBC028. Strip the byte;
+do not reconstruct the missing letter. Logged with context.
+
+**Curly apostrophes** normalise to ASCII `'`, or `didn't` from SBC060 becomes a
+different token from `didn't` everywhere else. Spanish accented characters are
+left alone — they are part of words.
+
+**Line parsing.** Field counts are not uniform (1 to 5 observed). Parse every
+line with one regex — two decimal numbers, whitespace of any kind, optional
+speaker, then text — not a main path plus a rescue path for odd files. The
+rescue path is always the less tested one. Take the last non-blank field as
+text; raise if another non-blank field remains to its left.
+
+**The `&` merge.** Du Bois §13.1 defines `&` as marking one IU split across
+lines when another speaker interrupts. 61 chains in the corpus: 60 same-speaker,
+merged by speaker identity (never by file position — two speakers can have
+threads open simultaneously). One cross-speaker chain, SBC011 lines 414–415, is
+collaborative completion: two speakers, two contours, therefore two IUs. It is
+coded as a named exception and is not merged. A leading `&` with no open
+fragment for that speaker raises unless it is that known case.
+
+**Exclusions: 13 lines of 70,056.** Nine `$` non-transcription lines (Du Bois
+§14.1), three backslash-fused lines, one ambiguous-field line. Each logged with
+full content and reason. `SBC037` is additionally excluded as bilingual:
+code-switched Spanish is not the same task as monolingual English, and one file
+cannot support a separate finding.
+
+**Expected IU count: 69,981.** Derivation: 70,056 raw − 9 `$` − 3 fused − 1
+ambiguous − 62 absorbed by merge. Verify the reader against the derivation, not
+the total; a discrepancy is a finding.
+
+### Tokenisation — decided, not yet implemented
+
+The atomic unit is the token after markers are stripped. Three tiers:
+
+**Removed in both conditions** — not speech, or not a boundary cue:
+overlap brackets (`[...]`, `[2...2]`), researcher comments `((...))` including
+their content, vocal noises in single parentheses with capitals (`(TSK)`,
+`(THROAT)`), standalone laughter `@`, the delimiters of all `<TAG ... TAG>`
+quality spans (content kept), `$` lines.
+
+**Removed in condition A, kept in condition B** — prosodic cues, the things a
+transcriber used to place the boundary: pauses (`...`, `..`, `...(N)`),
+inhalation `(H)` and exhalation `(Hx)`, lengthening `=`, accents `^` and
+backtick, boosters `!` and `;`, glottal stop `%`, terminal pitch `\` `/` `_`,
+IU truncation `--`, latching `(0)`.
+
+**Kept always** — actually uttered: words, truncated words (`y-`), and the
+standalone `X` indecipherable-syllable marker, which is real speech that was not
+heard clearly. Removing it would lose material and shift token counts.
+
+Angle brackets are wrappers over real speech: strip the delimiters, keep the
+content, never attempt to pair them. Du Bois §9.4 permits crossing nesting
+(`<@<HI ... @> HI>`), so pairing would be wrong as well as unnecessary.
+`<L2 ... L2>` is the same — code-switch marking over real words. Inline
+lengthening normalises (`s=o` → `so`) in condition A.
+
+**Condition B is not "markers retained" in general** — only the prosodic tier
+above. Keeping overlap brackets or laughter would add noise, not signal. The
+difference between A and B measures what the prosodic cue is worth, and is
+likely the most informative result of the phase. Report both; never merge them.
+
+Write the tokeniser with the A/B switch from the start. Validate the rule on
+its own — given one IU's raw text, show what comes out — before it is used
+anywhere.
+
+### No genre breakdown
+
+SBCSAE has no genre or register field, only free-text per-file descriptions. Do
+not hand-derive a category scheme from them: a judgment-based grouping invented
+for this purpose would not support the per-subset reasoning it is meant to
+enable. Break results down by document and by document length instead.
+
+### Where phase 2 stands
+
+Stages 1–3 complete: reading, line structure, `&` merge. Next is the tokeniser,
+per the decisions above, then the LLM run with `n_samples=5` from the start.
+
+## Sampling
+
+Sampling parameters are not controllable through this SDK — `temperature` is not
+accepted and has no effect. Variance is therefore addressed by repetition, not
+by pinning:
+
+- Run `n_samples=5` per document by default. Cache each sample separately.
+- Report mean and range across samples. **Never report a single draw as a
+  result.** Phase 1 produced several document-level findings that did not
+  survive resampling.
+- Roughly 5% of responses fail to parse (malformed JSON, a missing comma).
+  Retry on failure, and report the failure rate rather than letting failed
+  draws disappear from the denominator.
+
+## Degenerate output
+
+Check every parsed output for runs of consecutive predicted boundaries. The
+model intermittently stops segmenting partway through a long document and
+enumerates every remaining index, marking punctuation as unit starts. This:
+
+- produces a plausible-looking score rather than an error;
+- occurs in some draws and not others (2 of 5 on the one document where it was
+  studied), so its absence in one run is not evidence of absence;
+- is invisible to aggregate metrics and was found only by reading raw output.
+
+Flag it automatically. Report affected draws separately rather than folding
+them into the aggregate.
+
+## Working method
 
 Build and verify each step in isolation before starting the next. Stop after
-each and show me the result.
+each and show me the result. The phase 1 order was: representation → one
+reader, one file → metrics validated on synthetic perturbations → LLM on one
+document → scale. Later phases reuse the representation and metrics unchanged;
+what is rebuilt is the reader and, where the reference unit differs, the
+prompt.
 
-1. **Representation.** The two functions above, plus round-trip tests.
-2. **One reader, one file.** Parse a single DISRPT document into masses.
-   Verify `sum(masses) == n_tokens` and check the segment count by eye against
-   the source file. Do not write a generic multi-corpus loader yet.
-3. **Metrics on synthetic data.** Implement boundary precision/recall,
-   WindowDiff, and Boundary Similarity. Validate them by perturbation: take a
-   reference, damage it in known ways (shift boundaries by one, delete a
-   boundary, add a spurious one, randomise entirely), and confirm each metric
-   responds proportionally. This mirrors the `damaged.py` approach from the
-   2014 paper. If a metric misbehaves here, the bug is in the metric, not in
-   the model.
-4. **LLM on one document.** Prompt, call, parse. See constraints below.
-5. **Scale.** Full dataset, results table, comparison against published
-   DISRPT system scores.
+Validate anything new against an external reference where one exists. In phase
+1 this caught two real bugs in the metric implementations that would otherwise
+have produced plausible wrong numbers throughout.
+
+**Any check not run over the whole corpus is provisional, and should be
+reported as such.** Three checks in phase 2 stage 1 were first run on a subset
+and each correction was material: `grep` silently skipped three files it flagged
+as binary (4 NUL bytes became 6); the format survey used one file, which turned
+out not to have the corpus's majority field layout; and the `&` pairing rule was
+generalised from a single example that a later case contradicted. None of these
+produced an error. All produced a number.
 
 ## Constraints
 
 **Python 3.** Do not port the old Python 2 code from speech-units. Reimplement
-the metrics cleanly. The old repository is a reading reference for the
-approach, nothing more.
+cleanly. The old repository is a reading reference for the approach, nothing
+more.
 
-**Alignment is mandatory.** The model must return boundaries as token or line
-indices, never as rewritten text with inserted markers. After parsing any model
-output, assert `sum(hyp_masses) == sum(ref_masses)`. On mismatch, set the
-document aside and report it — never compute a metric on misaligned data. Track
-how many documents fail this check; it is a result in itself.
+**Alignment is mandatory.** The model must return boundaries as indices into
+the given sequence, never as rewritten text with inserted markers. After
+parsing any model output, assert `sum(hyp_masses) == sum(ref_masses)`. On
+mismatch, set the document aside and report it — never compute a metric on
+misaligned data. Track how many documents fail this check; it is a result in
+itself.
 
-**Persist raw model output to disk** before parsing, one file per document.
-These are needed to diagnose surprising numbers later.
+**Persist raw model output to disk** before parsing, one file per sample. These
+are needed to diagnose surprising numbers later, and to detect degenerate
+output after the fact.
 
-**Cache API calls.** Do not re-query the model for a document already
-processed unless explicitly asked.
+**Cache API calls.** Do not re-query for a document and sample index already
+processed unless explicitly asked. A cached response must parse and align
+before being treated as reusable.
 
 **No corpus data in git.** Corpora go in a gitignored directory. CID data in
 particular has its own distribution terms and must never be committed.
+
+**Check the data before trusting a score.** Two phase 1 documents scored near
+zero because their text had been replaced by underscores in the public
+distribution — the annotation was intact, the text was not. Detect this from
+content (proportion of masked or degenerate tokens per document) rather than by
+name or genre, and report the proportion for every document so that partial
+cases stay visible.
 
 ## What not to do
 
 - Do not refactor or "improve" the metric definitions to be more elegant. They
   must match the published definitions exactly.
-- Do not silently drop documents that fail alignment checks. Report them.
-- Do not aggregate scores across genres or corpora into a single headline
+- Do not silently drop documents that fail alignment or parse checks. Report
+  them with counts.
+- Do not aggregate across genres, registers or corpora into a single headline
   number without also reporting the per-subset breakdown. Evaluating by data
-  subset rather than in aggregate is a deliberate methodological choice here.
+  subset rather than in aggregate is a deliberate methodological choice here,
+  and it is what surfaced every real problem in phase 1.
+- Do not draw a conclusion from a subset selected on extreme values without
+  saying so. Selection on extremes guarantees regression to the mean on
+  resampling, independently of whether any effect exists.
 - Do not add a web UI, a CLI framework, or packaging. This is research code
   that produces tables.

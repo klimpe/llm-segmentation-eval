@@ -1,0 +1,15 @@
+file,line,reason,content
+SBC003,250,dubois_dollar_note,000000000 000000000 $ COMMA OR PERIOD?
+SBC003,257,dubois_dollar_note,000000000 000000000 $ CHECK CAPITALIZATION AFTER IU CONTOUR IS ADDED ABOVE
+SBC003,659,dubois_dollar_note,000000000 000000000 $ COMMA OR PERIOD?
+SBC003,1023,dubois_dollar_note,"000000000 000000000 $ HE SAYS ""LAUNDRY MAT""?"
+SBC003,1050,dubois_dollar_note,000000000 000000000 $ LAUNDRYMAT?
+SBC003,1523,dubois_dollar_note,000000000 000000000 $ HOW TO SHOW THIS AS ONE IU BROKEN BYE PARENTHETICAL EXCLAMATION?
+SBC004,809,backslash_fused,"706.61 707.96	        	... they'll get kind of surly,\00:11:47:96 00:11:49:46 708.11 708.71	SHARON: 	   [I did that]."
+SBC005,620,dubois_dollar_note,000000000 000000000 $ COMMA OR PERIOD?
+SBC005,789,dubois_dollar_note,000000000 000000000 $ COMMA OR PEROID?
+SBC007,631,backslash_fused,1179.10 1182.90	        	... And !Nicky helps her .. with him a lot anyway.\000000000 000000000 MARY: 1182.90 1186.92	        	... And then of course he [adores] me.
+SBC011,957,dubois_dollar_note,000000000 000000000 $ TEXT ENDS
+SBC013,1371,dubois_dollar_note,"0.00 0.00	$ INDETERMINATE BETWEEN ""TOO"" AND ""TWO"""
+SBC014,1122,backslash_fused,"1599.98 1602.72         	(H) They also --\000000000 000000000 1602.72 1604.72	        	(H) and it's also requirements by uh,"
+SBC016,1185,ambiguous_fields,1105.975	1106.375	BRAD:	[	[(H)] [uh]-- w--
