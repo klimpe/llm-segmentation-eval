@@ -446,6 +446,46 @@ Precision, mean across samples with [min-max] range:
 - `GUM_conversation_grounded`'s decline is real on average but is explained
   by §4.5's collapse, not a general precision loss: see there.
 
+**Selection on extremes, and what the shrinkage does and does not show.** These
+eight documents were chosen because their single-draw deltas were the largest in
+either direction. A single draw lands at an extreme partly because an effect is
+present and partly because the draw fell luckily; resampling removes the second
+component. Shrinkage was therefore expected here regardless of whether any
+effect exists, and the fact that deltas shrank is not by itself evidence against
+one. Mean delta among the four declines moves from −0.285 to −0.060 (79%
+shrinkage); among the four gains, from +0.131 to +0.069 (48%). Pure regression
+to the mean would compress both sides comparably. The asymmetry between them,
+not the shrinkage itself, is what carries information.
+
+**Few-shot narrows the spread as well as shifting it.** An unplanned
+observation: the zero-shot sample range is wider than the few-shot range in 6 of
+the 8 documents, with means of 0.251 against 0.159.
+
+| doc_id | zero-shot range | few-shot range |
+|---|---|---|
+| GUM_interview_gaming | 0.483 | 0.134 |
+| GUM_academic_exposure | 0.413 | 0.131 |
+| GUM_voyage_coron | 0.349 | 0.180 |
+| GUM_fiction_beast | 0.253 | 0.153 |
+| GUM_whow_joke | 0.222 | 0.112 |
+| GUM_bio_byron | 0.142 | 0.118 |
+| GUM_textbook_governments | 0.065 | 0.093 |
+| GUM_conversation_grounded | 0.084 | 0.354 |
+
+The two exceptions are explicable: `GUM_textbook_governments` has negligible
+spread in both conditions, and `GUM_conversation_grounded` is the collapse
+document, whose few-shot range is inflated by the intermittent failure described
+in §4.5 — which is itself consistent with the pattern, since the collapse occurs
+only in the few-shot condition.
+
+If this holds, the effect of worked examples is not simply a shift in where the
+model places boundaries but a narrowing of the range of outputs it will produce
+— examples constrain the response space, and in most of these documents they
+constrain it slightly off target. Five samples give only a crude estimate of
+spread, so this is offered as an observation rather than a result; but 6 of 8 in
+the same direction is not obviously chance, and it is directly testable with
+more draws.
+
 **Reading for the corpus-level result (§4.4).** This does not overturn the
 corpus-level few-shot precision drop, which pools far more boundary decisions
 than 8 resampled documents can speak to. What it changes is the
@@ -560,3 +600,85 @@ figures from different phases appear together.
 **Phase 3 — CID.** French, audio, and inter-annotator agreement measures from
 the original annotation campaign. Access pending. This is the only phase in
 which a human ceiling can be established.
+
+---
+
+## 8. Conclusion
+
+Of the three goals set out in §1, the first two are met. The third — whether the
+model–human gap is attributable to ignorance of the annotation convention — is
+not settled: the test that was run came back negative, but it tested a weaker
+proposition than the goal stated.
+
+**The pipeline is built and validated**, independently, three ways: against a
+reference metrics implementation (zero mismatches over ~5,800 trials, after
+two bugs the checks themselves caught), against DISRPT's own scorer (zero
+mismatches over 500 trials), and against the published corpus statistics
+(segment count matches exactly). Every number downstream of §4 rests on this.
+
+**A written-text zero-shot baseline is established**: micro F1 0.616
+(precision 0.544, recall 0.711), on `eng.rst.gum` dev. Recall exceeds
+precision in nine of eleven scored genres — the model over-segments relative
+to RST-DT granularity, not under. The comparison to a fine-tuned system
+(§4.2) is given for orientation only and supports no inference; a controlled
+comparison would need the test split and a matched approach, neither
+attempted here.
+
+**Worked examples do not close the gap.** Three annotated excerpts were the
+direct test of the convention-ignorance hypothesis, and they make the
+corpus-level result worse, not better: precision falls 6.7 points with recall
+flat (§4.4). What this establishes is narrower than it first appears: three
+examples fail to convey the convention, which is not the same as showing there
+is no convention gap to convey. A stronger test — more examples, or examples
+matched in register to the target document — has not been run.
+
+Two things complicate treating even this narrower claim as clean, though neither
+reverses it. First, one document's
+generation collapse (§4.5) — real, few-shot-specific, but stochastic
+(2 of 5 resamples, never in zero-shot) — accounts for roughly half the
+aggregate precision damage; the effect survives its removal (−0.038
+precision, −0.025 F1 over the remaining 21 documents) but is smaller than
+the headline number suggests. Second, resampling 8 of the 22 documents
+(§4.6) found the document-level story only half replicates: all four
+documents flagged as "helped" by few-shot stayed helped, but two of the four
+flagged as "harmed" turned out to be mostly a single unlucky zero-shot draw.
+The corpus-level sign holds under the collapse-excluded recomputation. The
+resampling cannot speak to it either way: those eight documents were selected on
+extreme deltas, four from each direction, so the sample is neither random with
+respect to the corpus nor balanced in a way that would license inference back to
+it. What resampling addresses is which documents the aggregate rests on — better
+supported for some than others, with 14 of 22 never resampled at all.
+
+**A candidate mechanism, not yet a finding.** The boundaries few-shot adds
+cluster on subject pronouns, coordinators and commas — the surface tokens
+the three worked examples happened to split on, rather than the underlying
+full-clause-coordination rule each split actually followed. This is
+consistent with the genre pattern (`conversation`, the register furthest
+from the examples' edited/prepared registers, is hit hardest) but is
+contradicted by the direction split itself: a uniform surface-mimicry effect
+should lower precision on most documents, and it does not (12 of 21). An
+unplanned resampling observation — few-shot narrows the output range as well
+as shifting it, in 6 of 8 tested documents — points at the examples
+constraining the response space rather than simply relabeling a threshold,
+but this rests on five samples per document and is offered as a direction
+for phase 2, not a result.
+
+**What phase 1 does not and cannot answer** is whether the model–human gap
+is large or small. Without multiple independent annotations of the same
+documents, 0.616 F1 has no ceiling to be read against — the same problem
+that motivated this project in §1 is still open at the end of it, by
+construction; only phase 3 (CID) can close it. Phase 2 changes the text but
+not this limitation.
+
+**Parse failure rate.** Roughly 5% of model responses fail to parse into a
+usable index list (malformed JSON, a missing comma). This was invisible at one
+draw per document and surfaced only under resampling. Phase 2 should budget for
+it: retry on parse failure, and report the rate rather than letting failed
+draws disappear from the denominator.
+
+**Standing configuration for phase 2.** Zero-shot, not few-shot: the
+negative result is decisive enough, and reproducible enough across the
+collapse-adjusted and resampled checks, that few-shot is not carried forward
+as the default. Sampling cannot be pinned at either phase (§2) — variance is
+addressed there the same way it was here, by resampling documents of
+interest, not by a reproducibility guarantee the API does not offer.
