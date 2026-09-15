@@ -148,15 +148,19 @@ collaborative completion: two speakers, two contours, therefore two IUs. It is
 coded as a named exception and is not merged. A leading `&` with no open
 fragment for that speaker raises unless it is that known case.
 
-**Exclusions: 13 lines of 70,056.** Nine `$` non-transcription lines (Du Bois
+**Exclusions: 14 lines of 70,083.** Ten `$` non-transcription lines (Du Bois
 §14.1), three backslash-fused lines, one ambiguous-field line. Each logged with
 full content and reason. `SBC037` is additionally excluded as bilingual:
 code-switched Spanish is not the same task as monolingual English, and one file
 cannot support a separate finding.
 
-**Expected IU count: 69,981.** Derivation: 70,056 raw − 9 `$` − 3 fused − 1
+**Expected IU count: 70,007.** Derivation: 70,083 raw − 10 `$` − 3 fused − 1
 ambiguous − 62 absorbed by merge. Verify the reader against the derivation, not
-the total; a discrepancy is a finding.
+the total; a discrepancy is a finding. (An earlier draft of this section said
+70,056 / 9 / 69,981 — both the raw-line and `$`-note counts were undercounts
+from early throwaway scripts, not from the corpus; see reports/phase2_data.md
+§7 for the root cause of each. The reader's actual output matches 70,007
+exactly.)
 
 ### Tokenisation — decided, not yet implemented
 
