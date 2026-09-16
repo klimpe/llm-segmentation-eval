@@ -1,0 +1,10 @@
+metric,value
+n_ius,69029
+n_raised,340
+raise_rate,0.0049
+n_tokenised,68689
+n_zero_word_ius,5297
+files_with_zero_word_ius,59
+mean_words_per_iu,3.5829
+max_words_per_iu,21
+n_ab_mismatches,0

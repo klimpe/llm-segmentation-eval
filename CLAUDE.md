@@ -162,9 +162,11 @@ from early throwaway scripts, not from the corpus; see reports/phase2_data.md
 §7 for the root cause of each. The reader's actual output matches 70,007
 exactly.)
 
-### Tokenisation — decided, not yet implemented
+### Tokenisation — decided and implemented (`sbcsae_tokenizer.py`)
 
-The atomic unit is the token after markers are stripped. Three tiers:
+The atomic unit is the token after markers are stripped. Four categories, not
+three — see the boundary-annotation addition below, decided during the
+stage-4 checks in `reports/phase2_tokeniser.md` §2a:
 
 **Removed in both conditions** — not speech, or not a boundary cue:
 overlap brackets (`[...]`, `[2...2]`), researcher comments `((...))` including
@@ -176,7 +178,18 @@ quality spans (content kept), `$` lines.
 transcriber used to place the boundary: pauses (`...`, `..`, `...(N)`),
 inhalation `(H)` and exhalation `(Hx)`, lengthening `=`, accents `^` and
 backtick, boosters `!` and `;`, glottal stop `%`, terminal pitch `\` `/` `_`,
-IU truncation `--`, latching `(0)`.
+latching `(0)`.
+
+**The boundary annotation itself — removed in BOTH conditions, but not
+tier 1**: transitional continuity punctuation `.` `,` `?` and IU truncation
+`--`. These were found to be IU-final in 99.4-100% of their whole-corpus
+occurrences (`reports/phase2_tokeniser.md` §3.2/§2a) — they mark where the
+segmentation boundary falls, not a prosodic quality carried by a word, so
+unlike the tier-2 cues above they are never rendered even in condition B.
+`--` moved here from tier 2 (it was never actually embeddable mid-word, so
+this changes its rendering, not its tokenisation behaviour). `.` `,` `?`
+were previously undocumented territory ("not in any tier"); they are now a
+named category (`Boundary` in the tokeniser), not silent no-ops.
 
 **Kept always** — actually uttered: words, truncated words (`y-`), and the
 standalone `X` indecipherable-syllable marker, which is real speech that was not

@@ -1,0 +1,49 @@
+class                tier                  count  files   before  between    after  no_words
+RESEARCH_COMMENT     1                       288     50       14        4        1       269
+BREATH_IN            2                     10047     59     8036      378       67      1566
+BREATH_OUT           2                      1099     57      150       32      358       559
+LATCHING             2                         0      0        0        0        0         0
+VOCAL_NOISE_CAPS     1                      2542     59     1069       32       21      1420
+ANGLE_OPEN           1                      3434     59     2655      724        3        52
+ANGLE_CLOSE          1                      3419     59        1      474     2896        48
+OVERLAP_NUM_OPEN     1                     11062     56     5495     3464      247      1856
+OVERLAP_NUM_CLOSE    1                     11017     56      217     3269     5637      1894
+OVERLAP_OPEN         1                     13183     59     7966     3190      206      1821
+OVERLAP_CLOSE        1                     13202     59      368     4048     6921      1865
+AT_SIGN              1                      5116     59      626      488      142      3860
+PAUSE_TIMED          2                         0      0        0        0        0         0
+PAUSE_LONG           2                     15847     59    13918     1208        6       715
+PAUSE_SHORT          2                     13873     59     9814     3468        9       582
+IU_TRUNCATION        2                      4682     59        0        0     4654        28
+LENGTHENING          2                      9594     59      497     5293     2818       986
+ACCENT_CARET         2                         0      0        0        0        0         0
+ACCENT_BACKTICK      2                         0      0        0        0        0         0
+BOOSTER_BANG         2                       378     11      132      246        0         0
+BOOSTER_SEMI         2                         0      0        0        0        0         0
+GLOTTAL              2                      1658     59      906      303      302       147
+PITCH_BACKSLASH      2                         0      0        0        0        0         0
+PITCH_SLASH          2                        10      5        0        7        3         0
+PITCH_UNDERSCORE     2                       609     34       26      174      403         6
+PERIOD               none (continuity)     25937     59       15        9    25891        22
+COMMA                none (continuity)     29035     59        0        5    29011        19
+QMARK                none (continuity)      3529     59        0        0     3529         0
+
+=== Patterns fitting no tier ===
+  DOUBLE_ANGLE_OPEN: count=94, 27 files
+  DOUBLE_ANGLE_CLOSE: count=83, 27 files
+  OTHER '~' (U+007E): count=1126, 49 files
+  OTHER '-' (U+002D): count=212, 52 files
+  OTHER '+' (U+002B): count=177, 24 files
+  OTHER '#' (U+0023): count=156, 11 files
+  OTHER '0' (U+0030): count=139, 16 files
+  OTHER "'" (U+0027): count=101, 35 files
+  OTHER '>' (U+003E): count=75, 33 files
+  OTHER '(' (U+0028): count=48, 20 files
+  OTHER '<' (U+003C): count=48, 25 files
+  OTHER ')' (U+0029): count=45, 18 files
+  OTHER '*' (U+002A): count=7, 3 files
+  OTHER '2' (U+0032): count=5, 4 files
+  OTHER '3' (U+0033): count=2, 2 files
+  OTHER '1' (U+0031): count=1, 1 files
+  OTHER '5' (U+0035): count=1, 1 files
+  OTHER '6' (U+0036): count=1, 1 files
