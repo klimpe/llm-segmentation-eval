@@ -127,8 +127,12 @@ A decode failure must raise, never substitute — `errors="replace"` turns a
 problem into plausible data, which is the failure mode this project exists to
 avoid.
 
-**NUL bytes.** Six, in SBC015, SBC016, SBC018, SBC020, SBC028. Strip the byte;
-do not reconstruct the missing letter. Logged with context.
+**NUL and DEL bytes.** 46 total (6 NUL, 40 DEL — DEL found and fixed during
+the stage-4 tokeniser pass, `reports/phase2_tokeniser.md`; both stripped by
+the same rule, for the same reason). Strip the byte; do not reconstruct the
+missing letter. Locations logged in `reports/phase2_nul_bytes.csv`; raw
+context is in the gitignored `reports/private/phase2_nul_bytes_full.csv`,
+not committed (licence forbids publishing transcript text).
 
 **Curly apostrophes** normalise to ASCII `'`, or `didn't` from SBC060 becomes a
 different token from `didn't` everywhere else. Spanish accented characters are
@@ -139,6 +143,17 @@ line with one regex — two decimal numbers, whitespace of any kind, optional
 speaker, then text — not a main path plus a rescue path for odd files. The
 rescue path is always the less tested one. Take the last non-blank field as
 text; raise if another non-blank field remains to its left.
+
+Within that one regex, the remainder after the two timestamps still splits
+two ways depending on whether a tab survives in it, and the two ways are
+deliberately asymmetric, not an inconsistency to fix. Tab present: answers
+"is whatever precedes the first tab a speaker" *permissively* — required
+for real colon-less speaker codes (`MONTOYA`, `>MAC`, `>ENV`, `KEN/KEV`,
+`SUE?`), which have no other structural signal to be recognised by. No tab
+present: answers *conservatively*, requiring an actual colon-terminated
+token — loosening this back to "whatever's there" reintroduces the
+leaked-`SPEAKER:` bug a prior stage-4 fix exists to have closed. Making
+either branch match the other breaks the case the other one exists for.
 
 **The `&` merge.** Du Bois §13.1 defines `&` as marking one IU split across
 lines when another speaker interrupts. 61 chains in the corpus: 60 same-speaker,

@@ -115,8 +115,22 @@ letter c/C should be:
 (`couple`, `coming`, `controls`, `cannot`, `correct` — the missing letter is
 obvious in every case.) The byte is deleted; the letter is not
 reconstructed. Same principle applied throughout this stage: don't infer
-content where the inference costs more than the content is worth. Full
-detail in `reports/phase2_nul_bytes.csv`.
+content where the inference costs more than the content is worth.
+
+**Stale as of stage 4: this was not the only stray control byte.** A
+stage-4 reader-defect pass (`reports/phase2_tokeniser.md`, git `a37c3ad`)
+found DEL (`0x7F`) stripped by the exact same rule, for the same reason
+(no documented transcription meaning, never reconstructed) — **40 more
+bytes**, corpus-wide, bringing the true total to **46 stripped control
+bytes (6 NUL + 40 DEL)**, not 6 — matching the "40 IUs changed" figure
+`reports/phase2_tokeniser.md` §5 reports for this fix (one DEL byte per
+affected IU). `_STRIPPED_BYTES` in `sbcsae_reader.py`
+has handled both since that fix; this section simply predates it and was
+never revisited. Locations for all 46 (file, line, byte) are in
+`reports/phase2_nul_bytes.csv`; the raw context snippets (quoted transcript
+text, kept out of git per the licence) are in the gitignored
+`reports/private/phase2_nul_bytes_full.csv` — "full detail" above pointed
+at the wrong one.
 
 **Character inventory: clean.** 93 unique characters across all text fields
 in all 60 files, zero alarm characters (no U+FFFD, no bare `\r`, no

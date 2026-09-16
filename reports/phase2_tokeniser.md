@@ -379,3 +379,27 @@ two-branch structure explicitly** (why they differ, not just that they
 differ) rather than record an aspiration to unify them — the asymmetry is
 load-bearing, not accidental. Not changed in CLAUDE.md this session, since
 only the §2a tier change was authorised there.
+
+---
+
+## 7. Follow-up verification session
+
+Every decision in §2, every check in §3, and the classifier merge in §4
+were re-verified from a clean context against the current code and corpus
+rather than taken on trust from this report's own prose — consistent with
+the standing rule that a number not re-derived is provisional. Result: all
+of it reproduced exactly. `pytest tests/test_sbcsae_tokenizer.py` — 54/54
+pass; full suite 577 passed, 11 skipped. A fresh `sbcsae_tokenizer_validate.py`
+run over the corpus reproduced §5's figures exactly: 340/69,029 raises
+(0.49%), 5,297 zero-word IUs, 68,689→63,392 reference segments. No
+regression, nothing to redo.
+
+One real gap found while chasing the §4 "stale pointer" instruction:
+`reports/phase2_data.md`'s NUL-byte section (§3 there) still said "six,"
+stripped, from before the stage-4 reader fix (`a37c3ad`) that found DEL
+(`0x7F`) stripped by the identical rule — 40 more bytes, 46 total (6 NUL +
+40 DEL), matching the "40 IUs changed" already on record here in §5. The
+section had simply never been revisited after that fix. Corrected in
+`reports/phase2_data.md` and in CLAUDE.md's mirrored bullet, and the
+pointer there now names the gitignored `reports/private/phase2_nul_bytes_full.csv`
+for context, not the public locations-only CSV.
