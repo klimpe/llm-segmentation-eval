@@ -86,7 +86,6 @@ U+0078	'x'	count=2317
 U+0079	'y'	count=26002
 U+007A	'z'	count=589
 U+007E	'~'	count=1162
-U+007F	'\x7f'	count=40
 U+00E1	'á'	count=12
 U+00E9	'é'	count=9
 U+00ED	'í'	count=10

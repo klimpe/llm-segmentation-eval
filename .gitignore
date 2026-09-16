@@ -7,3 +7,4 @@ llm_output_fewshot/
 llm_output_temp_resample/
 llm_output_fewshot_temp_resample/
 .env
+reports/private/

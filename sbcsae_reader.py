@@ -47,11 +47,22 @@ class IntonationUnit:
     merged_from: int = field(default=1)
 
 
+_STRIPPED_BYTES = {0x00: "NUL", 0x7F: "DEL"}
+
+
 def strip_nul_bytes(raw: bytes, doc_id: str, log_rows: list) -> bytes:
-    """Remove every NUL byte from raw, logging (doc_id, line, context) for
-    each to log_rows before removal. Line numbers are 1-indexed, counted
-    from '\\n' bytes in the untouched raw content, so they match what a
-    text editor would show regardless of the file's eventual encoding.
+    """Remove every NUL and DEL byte from raw, logging (doc_id, line, byte,
+    context) for each to log_rows before removal. Line numbers are
+    1-indexed, counted from '\\n' bytes in the untouched raw content, so
+    they match what a text editor would show regardless of the file's
+    eventual encoding.
+
+    DEL (0x7F) is stripped by the same rule as NUL and for the same reason:
+    it is a stray control byte with no documented transcription meaning,
+    never reconstructed, just removed and logged. It is single-byte in
+    every encoding this corpus uses (UTF-8, cp1252, latin-1), so it can be
+    detected here at the byte level exactly like NUL, before any decoding
+    happens.
     """
     cleaned = bytearray()
     line_no = 1
@@ -59,9 +70,11 @@ def strip_nul_bytes(raw: bytes, doc_id: str, log_rows: list) -> bytes:
     n = len(raw)
     while i < n:
         b = raw[i]
-        if b == 0:
+        if b in _STRIPPED_BYTES:
             ctx = raw[max(0, i - 20) : i + 20].decode("latin-1", errors="replace")
-            log_rows.append({"file": doc_id, "line": line_no, "context": repr(ctx)})
+            log_rows.append(
+                {"file": doc_id, "line": line_no, "byte": _STRIPPED_BYTES[b], "context": repr(ctx)}
+            )
         else:
             cleaned.append(b)
         if b == 0x0A:  # '\n'
@@ -111,25 +124,45 @@ class AmbiguousFieldsError(ValueError):
     """
 
 
+_SPEAKER_RE = re.compile(r"^([#>*]?[A-Za-z][A-Za-z0-9_]*):\s*")
+
+
 def split_line_fields(line: str) -> tuple[float, float, str, str]:
     """Parse one non-blank .trn line into (start, end, speaker, text).
 
     One regex, applied the same way to every line: capture the two leading
     floats, then whatever whitespace follows (a tab, a run of spaces, both,
     or -- for a handful of lines that lost their tabs entirely -- nothing
-    but spaces), then everything else.
+    but spaces), then everything else ("rest").
 
     If a tab remains in that remainder, the text before it is the speaker
-    (stripped, trailing ':' removed) and the text after is candidate text,
+    (stripped, trailing ':' removed -- the speaker field does not always
+    have a colon: "MONTOYA", ">MAC", "@@@2]" and other non-word content
+    have all been observed there) and the text after is candidate text,
     which may itself still contain tabs (extra blank padding fields, or,
     rarely, a stray trailing tab after real content). The actual text is
     the last NON-BLANK such field. If more than one non-blank field remains
     there, which one is the real text is ambiguous -- raise
     AmbiguousFieldsError rather than guess.
 
-    If no tab remains at all, there was never a separate speaker field on
-    this line (true for a run of 18 lines in SBC013): the whole remainder
-    is text, speaker is blank (inherited from context by the caller).
+    If no tab remains at all, the same speaker-token rule that identifies a
+    tab-separated speaker field is applied to `rest` directly: a word,
+    optionally prefixed with '#' (the disguised-name convention seen on some
+    speaker codes, e.g. "#FOSTER:"), '>' (non-human/environmental
+    pseudo-speakers, e.g. ">ENV:") or '*' (e.g. "*X:"), followed by ':' and
+    whitespace of any kind. This is the fix for a real reader defect: a
+    speaker field that is present but space-glued to the text instead of
+    tab-separated (e.g. "CAROLYN:                           [2@...]",
+    about 1,287 lines corpus-wide use spaces rather than a tab in at least
+    one gap -- see reports/phase2_data.md S4 -- a minority of which have
+    exactly this shape) was previously treated as "no speaker field at
+    all", leaking "SPEAKER:" into the text and leaving the IU's speaker
+    wrongly inherited from the previous line. Genuinely speakerless
+    continuation lines (no leading colon token) are unaffected: this
+    branch only ever recognises a colon-terminated token specifically,
+    unlike the more permissive first-tab-content rule above, because
+    without a tab there is no positional signal at all to fall back on if
+    the colon rule doesn't fire.
     """
     m = _HEAD_RE.match(line)
     if not m:
@@ -148,8 +181,13 @@ def split_line_fields(line: str) -> tuple[float, float, str, str]:
             )
         text = non_blank[0].strip() if non_blank else ""
     else:
-        speaker = ""
-        text = rest
+        speaker_match = _SPEAKER_RE.match(rest)
+        if speaker_match:
+            speaker = speaker_match.group(1)
+            text = rest[speaker_match.end() :].strip()
+        else:
+            speaker = ""
+            text = rest
 
     return float(start), float(end), speaker, text
 
@@ -346,14 +384,15 @@ if __name__ == "__main__":
             field_text = raw_line.split("\t")[-1]
             char_counts.update(field_text)
 
-    print("=== Stage 1: NUL bytes stripped ===")
-    print(f"total NUL bytes removed: {len(all_nul_rows)}  (this check covers all 60 files)")
+    print("=== Stage 1: NUL/DEL bytes stripped ===")
+    by_byte = Counter(row["byte"] for row in all_nul_rows)
+    print(f"total control bytes removed: {len(all_nul_rows)} {dict(by_byte)} (this check covers all 60 files)")
     with open(reports_dir / "phase2_nul_bytes.csv", "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=["file", "line", "context"])
+        w = csv.DictWriter(f, fieldnames=["file", "line", "byte", "context"])
         w.writeheader()
         w.writerows(all_nul_rows)
     for row in all_nul_rows:
-        print(f"  {row['file']} line {row['line']}: {row['context']}")
+        print(f"  {row['file']} line {row['line']} [{row['byte']}]: {row['context']}")
 
     print(f"\n=== Stage 1: character inventory ({len(char_counts)} unique characters) ===")
     with open(reports_dir / "phase2_char_inventory.txt", "w", encoding="utf-8") as f:
