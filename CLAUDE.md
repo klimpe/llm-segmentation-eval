@@ -134,6 +134,16 @@ missing letter. Locations logged in `reports/phase2_nul_bytes.csv`; raw
 context is in the gitignored `reports/private/phase2_nul_bytes_full.csv`,
 not committed (licence forbids publishing transcript text).
 
+**Lost-initial-letter corruption, in the tokeniser, not the reader.** Same
+principle as NUL/DEL — strip the corruption marker, keep whatever letters
+survive, never reconstruct — but this one lands past decoding, in the
+already-decoded text `sbcsae_tokenizer.py` sees, not in the raw bytes: a
+bare `0` glued before a lowercase letter (`0h,` for "uh,"/"oh,"), or the
+`0.000000e+00`/`0.000000E+00` spreadsheet-mantissa artifact glued before a
+word, with or without the exponent tail (`0.000000e+00verything`,
+`0.000000or`). One rule (`lost_initial_letter` in the tokeniser's rule
+table), one family, three surface shapes.
+
 **Curly apostrophes** normalise to ASCII `'`, or `didn't` from SBC060 becomes a
 different token from `didn't` everywhere else. Spanish accented characters are
 left alone — they are part of words.
@@ -187,13 +197,27 @@ stage-4 checks in `reports/phase2_tokeniser.md` §2a:
 overlap brackets (`[...]`, `[2...2]`), researcher comments `((...))` including
 their content, vocal noises in single parentheses with capitals (`(TSK)`,
 `(THROAT)`), standalone laughter `@`, the delimiters of all `<TAG ... TAG>`
-quality spans (content kept), `$` lines.
+quality spans (content kept), `$` lines. Moved here this session (stage-4
+follow-up, `reports/phase2_tokeniser.md` §1-§4): `<<TAG ... TAG>>` spans
+(same wrapper-over-real-speech treatment as single-angle, never paired,
+`_`/`-` included in the tag-name class); `+`, an event-timing marker inside
+`<<...>>` spans, not a prosodic cue (was previously undocumented/raising);
+a phonetic-gloss suffix on a word (`good_/god/`, `cello_(/cheller/)`) or a
+bare slash-delimited phonetic aside (`/pub/`) — the respelling is dropped
+whole, the orthographic word before it (if any) is kept.
 
 **Removed in condition A, kept in condition B** — prosodic cues, the things a
 transcriber used to place the boundary: pauses (`...`, `..`, `...(N)`),
-inhalation `(H)` and exhalation `(Hx)`, lengthening `=`, accents `^` and
-backtick, boosters `!` and `;`, glottal stop `%`, terminal pitch `\` `/` `_`,
-latching `(0)`.
+inhalation `(H)` and exhalation `(Hx)` (case-folded on H/X this session —
+`(h)`, `(hx)`, `(HX)` all mean the same thing), lengthening `=`, accents `^`
+and backtick, boosters `!` and `;`, glottal stop `%`, terminal pitch `\`,
+latching `(0)`. `/` and `_` were removed from this tier this session:
+corpus-wide review found no genuine pitch-marking use of either left. `_`
+between letters is literally part of the word (`nineteen_ninety_three`,
+kept as one token, underscore included — not dropped-and-fused the way an
+embedded tier-1/2 mark is), and every other non-word use of `_`/`/` is
+covered by the phonetic-gloss rule above, is a still-undecided
+self-interruption marker (below), or (for `/`) doesn't occur.
 
 **The boundary annotation itself — removed in BOTH conditions, but not
 tier 1**: transitional continuity punctuation `.` `,` `?` and IU truncation
@@ -224,6 +248,21 @@ likely the most informative result of the phase. Report both; never merge them.
 Write the tokeniser with the A/B switch from the start. Validate the rule on
 its own — given one IU's raw text, show what comes out — before it is used
 anywhere.
+
+**Raises: 311 of 69,029 IUs (0.45%), down from 340 — still not zero, still
+not decided.** Every raise is logged (file, line, character, reason) to
+`reports/private/phase2_tokenizer_raises_full.csv`; counts and reasons only
+(no transcript text) in the committed `reports/phase2_tokenizer_raises.csv`.
+Dominant remaining categories, each its own open decision, none authorised:
+`_` (210 IUs, mostly SBC012/SBC013) — a self-interruption/abandoned-
+utterance marker (trailing `word_`, standalone `__`), a different
+phenomenon from anything above, found but not decided; `-` (66) — orphaned
+hyphens (a compound split by a bracket, or an isolated dash); `(` (26) — a
+lowercase vocal-noise name (`(throat)`) or a mark glued inside plain
+parens with no brackets (`(H=)`), neither covered by the case-folding
+above; `>`/`<` (6) — single-angle tags hitting the same zero-content
+open/close adjacency mechanism fixed for `<<...>>` above, not yet fixed for
+single angle.
 
 ### No genre breakdown
 

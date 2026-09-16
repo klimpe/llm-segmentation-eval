@@ -3,7 +3,11 @@
 Runs the tokeniser over every IU produced by the settled reader (SBC037
 excluded throughout) and reports, without deciding what to do about any of
 it:
-  - number of raises, broken down by the offending character/pattern
+  - number of raises, broken down by the offending character/pattern, with
+    every individual raise logged (file, line, character, reason) -- never
+    silently skipped -- to reports/private/ (full raw context, gitignored)
+    and reports/phase2_tokenizer_raises.csv (committed: counts and reasons
+    only, no transcript text, per the licence)
   - number of IUs with zero words after tokenisation, broken down by an
     8-category composition breakdown and by file
   - segment counts per file before/after dropping zero-word IUs from the
@@ -23,10 +27,36 @@ import re
 from collections import Counter, defaultdict
 from pathlib import Path
 
+from sbcsae_marker_inventory import find_line_number
 from sbcsae_reader import iter_trn_documents
 from sbcsae_tokenizer import TokenizeError, tokenize, words_only
 
 _LEADING_SYMBOL_RE = re.compile(r"unrecognised symbol U\+([0-9A-Fa-f]+)")
+
+# One descriptive reason per raising character, from this session's
+# corpus-wide review (reports/phase2_tokeniser.md S0/S1/S4) -- not a code
+# rule, just what's recorded in the log so a raise is never silent about
+# why. None of these are authorised fixes; each is its own open decision.
+_RAISE_REASON = {
+    "_": "self-interruption/abandoned-utterance marker (trailing 'word_' or "
+    "standalone '__'), concentrated in SBC012/SBC013 -- found S1d, not authorised",
+    "-": "orphaned hyphen: a hyphenated compound split by an overlap bracket "
+    "or other tier-1 delimiter, or an isolated dash with nothing glued to "
+    "its left -- found S0a, not authorised",
+    "(": "case-folded or mark-embedded vocal-noise annotation not covered by "
+    "S1e (a lowercase name, e.g. '(throat)', or a mark such as '=' glued "
+    "inside plain parens, e.g. '(H=)') -- not authorised",
+    ">": "single-angle tag: zero-content open/close adjacency (same "
+    "mechanism as the double-angle bug fixed in S1b, not yet fixed for "
+    "single angle) or a close missing its repeated tag name before '>' "
+    "-- not authorised",
+    "<": "single-angle tag, same as '>' above -- not authorised",
+    "*": "disguise prefix not immediately followed by a letter (end of "
+    "string, or a second stacked disguise prefix) -- outside the "
+    "authorised letter-prefix case",
+    "#": "disguise prefix immediately followed by a digit, not a letter "
+    "-- outside the authorised letter-prefix case",
+}
 
 _LAUGHTER_ONLY = re.compile(r"^[\s@]+$")
 _BREATH_ONLY = re.compile(r"^(?:\s*\(Hx?\)\s*)+$")
@@ -59,6 +89,7 @@ def main():
     n_raised = 0
     raise_by_char = Counter()
     raise_by_file = defaultdict(set)
+    raise_log = []  # every single raise, never silently skipped
     n_zero_word = 0
     zero_word_by_file = Counter()
     zero_word_composition = Counter()
@@ -80,6 +111,16 @@ def main():
                 key = chr(int(m.group(1), 16)) if m else "<unparsed>"
                 raise_by_char[key] += 1
                 raise_by_file[key].add(doc_id)
+                raise_log.append(
+                    {
+                        "file": doc_id,
+                        "line": find_line_number(doc_id, u.text) or "",
+                        "char": key,
+                        "codepoint": f"U+{ord(key):04X}" if key != "<unparsed>" else "",
+                        "reason": _RAISE_REASON.get(key, "unclassified -- not yet reviewed"),
+                        "text": u.text,
+                    }
+                )
                 continue
 
             words = words_only(items)
@@ -137,7 +178,7 @@ def main():
     reports_dir.mkdir(exist_ok=True)
 
     with open(reports_dir / "phase2_tokenizer_raises.csv", "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=["char", "codepoint", "count", "files"])
+        w = csv.DictWriter(f, fieldnames=["char", "codepoint", "count", "files", "reason"])
         w.writeheader()
         for ch, c in raise_by_char.most_common():
             w.writerow(
@@ -146,8 +187,16 @@ def main():
                     "codepoint": f"U+{ord(ch):04X}" if ch != "<unparsed>" else "",
                     "count": c,
                     "files": len(raise_by_file[ch]),
+                    "reason": _RAISE_REASON.get(ch, "unclassified -- not yet reviewed"),
                 }
             )
+
+    private_dir = Path("reports/private")
+    private_dir.mkdir(parents=True, exist_ok=True)
+    with open(private_dir / "phase2_tokenizer_raises_full.csv", "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=["file", "line", "char", "codepoint", "reason", "text"])
+        w.writeheader()
+        w.writerows(raise_log)
 
     with open(
         reports_dir / "phase2_tokenizer_zero_word_composition.csv", "w", newline="", encoding="utf-8"

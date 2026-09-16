@@ -1,14 +1,8 @@
-char,codepoint,count,files
-<,U+003C,94,28
-0,U+0030,65,15
--,U+002D,58,28
-(,U+0028,44,19
->,U+003E,44,18
-+,U+002B,22,11
-2,U+0032,5,4
-*,U+002A,2,2
-3,U+0033,2,2
-1,U+0031,1,1
-#,U+0023,1,1
-),U+0029,1,1
-6,U+0036,1,1
+char,codepoint,count,files,reason
+_,U+005F,210,18,"self-interruption/abandoned-utterance marker (trailing 'word_' or standalone '__'), concentrated in SBC012/SBC013 -- found S1d, not authorised"
+-,U+002D,66,31,"orphaned hyphen: a hyphenated compound split by an overlap bracket or other tier-1 delimiter, or an isolated dash with nothing glued to its left -- found S0a, not authorised"
+(,U+0028,26,10,"case-folded or mark-embedded vocal-noise annotation not covered by S1e (a lowercase name, e.g. '(throat)', or a mark such as '=' glued inside plain parens, e.g. '(H=)') -- not authorised"
+>,U+003E,5,5,"single-angle tag: zero-content open/close adjacency (same mechanism as the double-angle bug fixed in S1b, not yet fixed for single angle) or a close missing its repeated tag name before '>' -- not authorised"
+*,U+002A,2,2,"disguise prefix not immediately followed by a letter (end of string, or a second stacked disguise prefix) -- outside the authorised letter-prefix case"
+#,U+0023,1,1,"disguise prefix immediately followed by a digit, not a letter -- outside the authorised letter-prefix case"
+<,U+003C,1,1,"single-angle tag, same as '>' above -- not authorised"

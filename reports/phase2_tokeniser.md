@@ -403,3 +403,192 @@ section had simply never been revisited after that fix. Corrected in
 `reports/phase2_data.md` and in CLAUDE.md's mirrored bullet, and the
 pointer there now names the gitignored `reports/private/phase2_nul_bytes_full.csv`
 for context, not the public locations-only CSV.
+
+---
+
+## 8. Decisions from the §3a-3f findings, and their implementation
+
+Code changed this session (`sbcsae_tokenizer.py`, `sbcsae_tokenizer_validate.py`,
+`tests/test_sbcsae_tokenizer.py`) — first time in this stage the tokeniser
+itself, not just its reports, was modified. Every rule below has a
+hand-written test and a whole-corpus count. 79 tokenizer tests pass (up
+from 54); full suite 602 passed, 11 skipped (up from 577).
+
+### 8.0 Before implementing
+
+**a) Orphaned `-` (58 IUs, 28 files) — no rule.** Heterogeneous: mostly a
+hyphenated compound split by an overlap bracket or other delimiter
+(`third]-graders`, `eighty]-seven`, `half]-way`); some genuinely isolated
+dashes (false starts, trailing "`-`" with nothing glued to its left); a few
+combined with a pause (`eighty .. -three`). Not one phenomenon, so not
+touched.
+
+**b) Remaining `#`/`*` raises.** `#`: 1 IU (`SBC019`, `[#5Jason #Dill5]` —
+`#` followed by a digit, not a letter). `*`: 2 IUs (`SBC001`, `X[3X3]*`,
+trailing with nothing after; `SBC019`, `*#Vodnoy`, a second, stacked
+disguise prefix). Both already documented as raise-cases; still raise.
+
+**c) `.`, `..`, `...` verified independently.** `(H)`, `(Hx)`, `--`, `?`,
+`..` matched an independent regex count exactly. `...`/`.` differed by 2
+each from a naive dot-run simulation — traced to the exact 2 IUs
+(`((J,_M,_P_LAUGHING_7.8_SEC))`, `((H,_J,_P_LAUGHING_8.0_SEC))`): a decimal
+point inside a researcher-comment timestamp, correctly absorbed into the
+dropped `((...))` span rather than double-counted as `PERIOD`. Not a bug —
+the DOUBLE_ANGLE undercount mechanism (shared, competing greedy letter
+runs) has no analogue here (fixed-length patterns, nothing to compete
+over).
+
+### 8.1 Implemented
+
+**a) Lost-initial-letter corruption — one rule, `lost_initial_letter`.**
+Unifies the bare-`0`-before-a-lowercase-letter case with the
+`0.000000e+00`/`E+00` artifact, **and a third shape found this session**:
+the same artifact missing its exponent tail (`0.000000or`, `0.000000irst`
+— `SBC024`, `SBC028`). `0(?:\.000000(?:[eE]\+00)?)?(?=[a-z])`. Files: bare
+zero in 15 files (62 occurrences); no-exponent in 2 (`SBC024`, `SBC028`,
+2); full exponent in 5 (`SBC015`, `SBC017`, `SBC020`, `SBC025`, `SBC026`,
+5) — the exponent-form file list is unchanged from §2d's prior count.
+
+**b) `<<TAG` / `TAG>>` delimiters.** Three rules: `double_angle_wrap`
+(`<<[A-Za-z][A-Za-z_\-]*>>`, tried first) for the zero-content case
+(`<<THUMP>>`) that would otherwise reproduce the §3b undercount mechanism
+inside the tokeniser itself; `double_angle_open`/`double_angle_close` for
+the general case. `_`/`-` included in the tag-name class throughout, so
+multi-word names don't get half-eaten. No pairing: open/close never
+checked against each other, within or across IUs (verified with a
+mismatched-name case, `VOMIT-SOUND`/`VOMIT-NOISE`, and an open-with-no-
+close-in-IU case).
+
+**c) `+`.** New `drop` rule, `plus_event_timing`. Fuses mid-word like any
+other tier-1 mark via the existing fusion logic, no special case needed.
+
+**d) `_`/`/` reclassified out of tier 2.** `word_gloss_suffix`
+(`_\(?/[^/]*/\)?`) drops a phonetic-gloss suffix whole, keeping the word
+before it (`good_/god/` → `good`, dropping `_/god/` entirely — verified
+before/after: before this session `good`, `/`, `god`, `/` all separately
+tokenised as tier-2 pitch cues with nothing dropped; after, one `Word`
+"good", nothing else). `bare_phonetic_gloss` (`/[^/]*/`) drops the 2
+IUs (`SBC006`, `SBC016`) where the same convention appears without a
+leading word+`_`. The `word` pattern's internal-joiner class gained `_`
+alongside `'`/`-`, so a word-internal underscore is a direct regex match,
+kept literally (`nineteen_ninety_three` stays as one token with its
+underscores, not smashed together) — this also resolves the previously-
+reported `SBC058` singing-span fusion side-effect (§3f), since those
+underscore-joined runs now match in one shot instead of going through the
+fusion mechanism at all.
+
+Full breakdown of all 609 `_` and all 10 `/` (whole-corpus, this session):
+`/` is 100% accounted for (6 in a word-gloss suffix, 4 in a bare gloss) —
+**zero left that could be terminal pitch.** `_`: 160 word-internal
+(letters both sides), 3 in a gloss suffix, and **~230+ in a newly-found
+third pattern this rule does not authorise** — a self-interruption/
+abandoned-utterance marker (trailing `word_`, or a standalone `__`),
+concentrated almost entirely in `SBC012`/`SBC013`. **Zero of the 609 are
+terminal pitch either** — that finding fully justifies removing `_` from
+tier 2, but the self-interruption pattern is a real, sizeable, undecided
+phenomenon, not folded into this rule, and now the dominant raise category
+(§8.4).
+
+**e) Five fixes, one census.** `(h)`/`(hx)`/`(HX)` case-folded onto the
+existing breath cues (both letters, not just the first). `empty_parens`
+drops bare `()`. `yawn_named_exception` drops the one-off `(YAWN0` (a
+vocal-noise closing `)` mistyped as `0` — the same lost-character
+phenomenon as (a), landing on a delimiter). `stray_close_paren_named_
+exception` drops the one stray `)` in `SBC024`'s `[Look okay)]`, anchored
+tightly to that exact context (verified it does **not** fire on an
+unrelated `)]`, e.g. `[Look fine)]`, so it isn't a general orphan-`)`
+rule). **Digit census, corpus-wide, outside timestamps and every already-
+matched context** (overlap brackets, angle-tag names, the float artifact,
+research comments): 86 residual digits, **zero real numerals** — SBCSAE
+spells numbers as words throughout, confirmed independently of the
+earlier per-character raise counts. All 86 are numbered-overlap-bracket
+leftovers with a missing or misplaced bracket character (`[2I mean2,`
+missing its `]`; `2[cause I2]` with the leading `2` outside the bracket
+instead of inside). New low-priority catch-all rule, `overlap_leftover_
+digit` (`\d+`), reached only after every specific higher-priority rule has
+had first claim, so it never touches a digit that belongs to a named
+construct.
+
+### 8.2 Speakers
+
+**a) Every `>`-prefixed source, IU and (tokenised, not raw-regex) word
+count per file** — totals: `>ENV` 174 IUs/396 raw-alpha, but **only 9 real
+tokenised words**, all in `SBC008`/`SBC013`; `>MAC` 20 IUs/5 words
+(`SBC024`); `>RADIO` 1 IU/2 words (`SBC053`); `>DOG`, `>CAT`, `>BABY`,
+`>HORSE` all 0 tokenised words. **This corrects a raw-regex-based count
+from earlier in this stage that showed far more "words"** — that count was
+counting letters inside `((RESEARCH_COMMENT))` annotations as words; the
+real, tokenised count is near-zero almost everywhere, confirming "genuine
+non-human pseudo-speaker source" for the bulk of these rows. **The
+exception is real and not yet explained**: `SBC008`/`SBC013`'s `>ENV` IUs
+include actual sentences (`"... to= expose himself to a person,"`,
+`"It's like sparkling= grape juice .. cocktail,"`) — not environmental
+sound descriptions. Reported, not touched (§2c: labels not normalised
+this session).
+
+**b) 356 vs 350 (file, speaker) pairs, reconciled in one line:** 356
+includes `SBC037`'s own 6 speakers; 350 excludes them, per the standing
+SBC037-out-of-scope rule applied everywhere else in this stage. 350 + 6 =
+356 exactly — not a counting error, a scope difference.
+
+**c) Labels not normalised.** No change to speaker tokens this session.
+
+### 8.3 Fragment-fusion reconciliation
+
+**167 three-fragment / 3 four-fragment fusions now, not 183/5 (last
+session's count) — and not 173, which does not appear anywhere in this
+repository or in either session's recorded output; if that number has a
+source, it isn't one I can find, and I'm not going to fabricate a
+reconciliation for it.** What actually changed the 183/5 baseline: §8.1d's
+underscore-in-word-pattern change turns underscore-joined compounds
+(`nineteen_ninety_three`, and the `SBC058` singing-span runs) into single
+regex matches (`n_fragments=1`), removing them from the multi-fragment
+buckets entirely — this alone accounts for the four-fragment drop from 5
+to 3 (both `SBC058` cases). §8.1c's new `+`-fusion rule pulls in the
+opposite direction (some previously-raising `+`-interrupted words now
+complete successfully as multi-fragment words), so the net 183→167 change
+is not attributable to one rule in isolation; both were verified in
+combination via a full corpus rerun, not derived arithmetically.
+
+### 8.4 Raising IUs: logged, not skipped
+
+Every raise is now individually logged — file, best-effort line number,
+character, a descriptive reason, and (private only) the raw text — via
+`sbcsae_tokenizer_validate.py`, to `reports/private/phase2_tokenizer_
+raises_full.csv` (gitignored, has transcript text) and `reports/
+phase2_tokenizer_raises.csv` (committed: counts and reasons, no text).
+**311 of 69,029 (0.45%), down from 340/0.49% — not zero.** By character:
+`_` 210 (18 files — the §8.1d self-interruption marker, found, not
+authorised), `-` 66 (31 files — §8.0a's orphaned hyphens), `(` 26 (10
+files — a lowercase vocal-noise name or a mark glued inside plain parens
+with no brackets, e.g. `(H=)`, neither covered by §8.1e), `>` 5 + `<` 1 (6
+files — the same zero-content open/close adjacency mechanism fixed for
+`<<...>>` in §8.1b, not yet fixed for single-angle tags, plus a close
+missing its repeated tag name before `>`), `*` 2, `#` 1 (§8.0b, unchanged).
+**"Zero raises" was not reached.** Every one of these is a real, named,
+described gap, not a silent drop — none is guessed at or fixed without
+authorisation.
+
+Rerun, whole-corpus, this session: reference segments 68,718 → 63,354 (was
+68,689 → 63,392). The net +29 tokenised is not simply 29 IUs added to the
+same set — verified directly against the pre-session tokeniser: **239 IUs
+that used to raise now tokenise, and 210 that used to tokenise now raise**
+(239 − 210 = 29 exactly), the latter almost entirely the §8.1d
+self-interruption-marker IUs that a blanket tier-2 `_` cue used to swallow
+without complaint. Zero IUs that tokenised under both versions changed
+word count (checked directly, not assumed) — the zero-word total moved
+because the swapped-in and swapped-out sets have different zero-word
+compositions (many of the 239 newly-fixed are markers-only, e.g.
+`<<THUMP>>` alone; most of the 210 newly-raising carry real words around
+the `_`, e.g. "`%_you know,`"), not because any individual IU's word count
+changed.
+
+### 8.5 CLAUDE.md and this report
+
+CLAUDE.md's Tokenisation section: `<<TAG...TAG>>` and `+` moved into tier
+1; terminal pitch narrowed to backslash only (`/`/`_` removed, with the
+word-internal-underscore and phonetic-gloss treatment described in their
+place); the lost-initial-letter rule added next to NUL/DEL in "Reading the
+corpus," parallel-structured with it since it's the same principle one
+processing stage later. This report updated (this section). Committed and
+pushed together.

@@ -185,19 +185,73 @@ def test_booster_semicolon_synthetic():
     assert [w.text for w in words_only(items)] == ["word", "here"]
 
 
+def test_breath_lowercase_h():
+    items = tokenize("(h) word")
+    assert [w.text for w in words_only(items)] == ["word"]
+
+
+def test_breath_lowercase_hx():
+    items = tokenize("word (hx) here")
+    assert [w.text for w in words_only(items)] == ["word", "here"]
+
+
+def test_breath_out_mixed_case_hx():
+    items = tokenize("word (HX) here")
+    assert [w.text for w in words_only(items)] == ["word", "here"]
+
+
+def test_empty_parens_dropped():
+    items = tokenize("@() word")
+    assert [w.text for w in words_only(items)] == ["word"]
+
+
+def test_yawn_named_exception():
+    items = tokenize("(YAWN0 Unhunh,")
+    assert [w.text for w in words_only(items)] == ["Unhunh"]
+
+
+def test_stray_close_paren_named_exception():
+    items = tokenize("[Look okay)].")
+    assert [w.text for w in words_only(items)] == ["Look", "okay"]
+
+
+def test_stray_close_paren_elsewhere_still_raises():
+    # Not the SBC024 case -- must not become a general orphan-) rule.
+    with pytest.raises(TokenizeError):
+        tokenize("[Look fine)].")
+
+
+def test_overlap_leftover_digit_after_close():
+    items = tokenize("[2I mean2, yeah")
+    assert [w.text for w in words_only(items)] == ["I", "mean", "yeah"]
+
+
+def test_overlap_leftover_digit_before_open():
+    items = tokenize("2[cause I2] only")
+    assert [w.text for w in words_only(items)] == ["cause", "I", "only"]
+
+
+def test_overlap_leftover_digit_trailing_extra():
+    items = tokenize("[2(H)2]1 .. life")
+    assert [w.text for w in words_only(items)] == ["life"]
+
+
+def test_overlap_leftover_digit_catches_non_glued_float_junk_too():
+    # S1e's generic digit catch-all is reached only after every specific
+    # rule above (including S1a's glued lost-initial-letter form) has had
+    # first claim -- a NON-glued "0.000000e+00" (space before "word", so
+    # S1a's lookahead doesn't apply) doesn't raise any more: the digit runs
+    # are dropped as leftovers, and the "e" between them, not glued to
+    # either digit run's absence, surfaces as its own one-letter word
+    # (unlike S1a's glued form, nothing here identifies "e" as part of a
+    # single artifact to consume whole).
+    items = tokenize("0.000000e+00 word")
+    assert [w.text for w in words_only(items)] == ["e", "word"]
+
+
 def test_glottal_stop():
     items = tokenize("coming%, yeah")
     assert [w.text for w in words_only(items)] == ["coming", "yeah"]
-
-
-def test_pitch_slash():
-    items = tokenize("okay/ yeah")
-    assert [w.text for w in words_only(items)] == ["okay", "yeah"]
-
-
-def test_pitch_underscore():
-    items = tokenize("okay_ yeah")
-    assert [w.text for w in words_only(items)] == ["okay", "yeah"]
 
 
 def test_pitch_backslash_synthetic():
@@ -233,7 +287,6 @@ def test_continuity_punctuation_not_a_token():
         # authorised (see S2 tests below).
         "X[3X3]*",  # trailing '*' with nothing after it -- same reason.
         "[#5Jason]",  # '#' followed by a digit, not a letter -- still raises.
-        "<<SNAP +just SNAP>>",  # double-angle span, not in any documented tier
         "KENDRA: text",  # colon: not a documented marker (a settled reader bug used to
         # leak this into IU text; the reader is now fixed so this string
         # should never actually reach the tokeniser -- but the tokeniser
@@ -246,8 +299,6 @@ def test_continuity_punctuation_not_a_token():
         "((RANDOM_COMMENT) word",  # a single-paren-closed researcher comment
         # that is NOT the one named exception (DOG_BARKING_BEGINS) -- still
         # raises rather than silently accepting any malformed comment.
-        "0.000000e+00 word",  # the float artifact NOT glued to a word (space
-        # after it) -- only the glued case is authorised.
     ],
 )
 def test_undocumented_patterns_raise(raw):
@@ -277,6 +328,86 @@ def test_percent_span_tag():
     assert [w.text for w in words_only(items)] == ["it", "takes", "like"]
 
 
+def test_double_angle_zero_content_wrap():
+    items = tokenize("<<THUMP>> like that")
+    assert [w.text for w in words_only(items)] == ["like", "that"]
+
+
+def test_double_angle_open_close_with_content():
+    items = tokenize("<<SNAP just SNAP>> like that")
+    assert [w.text for w in words_only(items)] == ["just", "like", "that"]
+
+
+def test_double_angle_mismatched_names_not_paired():
+    # No pairing: open and close are each stripped on their own; a
+    # genuine name mismatch (S3b) must not raise or be treated specially.
+    items = tokenize("<<VOMIT-SOUND real word VOMIT-NOISE>>")
+    assert [w.text for w in words_only(items)] == ["real", "word"]
+
+
+def test_double_angle_multiword_underscore_tag_name():
+    items = tokenize("<<WATER_RUNNING_AND_DISH_NOISE>> quiet now")
+    assert [w.text for w in words_only(items)] == ["quiet", "now"]
+
+
+def test_word_gloss_suffix_no_parens():
+    # good_/god/ -- the phonetic respelling is dropped with its "_", the
+    # orthographic word before it is kept.
+    before = tokenize("good_/god/ was said")
+    assert [w.raw for w in words_only(before)] == ["good", "was", "said"]
+    assert [w.text for w in words_only(before)] == ["good", "was", "said"]
+
+
+def test_word_gloss_suffix_with_parens():
+    items = tokenize("cello_(/cheller/) is nice")
+    assert [w.text for w in words_only(items)] == ["cello", "is", "nice"]
+
+
+def test_bare_phonetic_gloss_standalone():
+    items = tokenize("The /pub/ Generation")
+    assert [w.text for w in words_only(items)] == ["The", "Generation"]
+
+
+def test_underscore_word_internal_kept_literally():
+    items = tokenize("nineteen_ninety_three happened")
+    assert [w.text for w in words_only(items)] == ["nineteen_ninety_three", "happened"]
+
+
+def test_underscore_trailing_self_interruption_still_raises():
+    # Not authorised: a trailing "_" after a word, not followed by a
+    # letter or a gloss -- the self-interruption marker found in SBC012/
+    # SBC013, reported but not decided this session.
+    with pytest.raises(TokenizeError):
+        tokenize("some t_ thing")
+
+
+def test_bare_double_underscore_still_raises():
+    with pytest.raises(TokenizeError):
+        tokenize("well __")
+
+
+def test_plus_dropped_inside_tag_span():
+    items = tokenize("<<POUND +money POUND>>")
+    assert [w.text for w in words_only(items)] == ["money"]
+
+
+def test_plus_fuses_mid_word():
+    items = tokenize("ob+jecting to that")
+    assert [w.text for w in words_only(items)] == ["objecting", "to", "that"]
+
+
+def test_plus_standalone_dropped():
+    items = tokenize("+money.")
+    assert [w.text for w in words_only(items)] == ["money"]
+
+
+def test_double_angle_open_only_no_close_in_iu():
+    # A tag opened here and closed in a later IU: no pairing required, no
+    # raise just because this IU's close isn't visible.
+    items = tokenize("<<SNAP like that")
+    assert [w.text for w in words_only(items)] == ["like", "that"]
+
+
 def test_float_artifact_glued_to_word():
     items = tokenize("0.000000e+00verything was great")
     # Stripped, not reconstructed: the remaining letters are kept as-is.
@@ -286,6 +417,28 @@ def test_float_artifact_glued_to_word():
 def test_float_artifact_uppercase_e():
     items = tokenize("0.000000E+00specially of course")
     assert [w.text for w in words_only(items)] == ["specially", "of", "course"]
+
+
+def test_float_artifact_no_exponent():
+    # Same corruption, exponent tail itself lost: "0.000000or" -> "or".
+    items = tokenize("0.000000or] .. Or")
+    assert [w.text for w in words_only(items)] == ["or", "Or"]
+
+
+def test_bare_zero_lost_letter():
+    items = tokenize("0h, 0eople")
+    assert [w.text for w in words_only(items)] == ["h", "eople"]
+
+
+def test_bare_zero_mid_word():
+    items = tokenize("r0h=,")
+    assert [w.text for w in words_only(items)] == ["rh"]
+
+
+def test_zero_before_hyphen_still_raises():
+    # Not a lowercase letter next -- outside the authorised shape.
+    with pytest.raises(TokenizeError):
+        tokenize("0- le- --")
 
 
 # --- authorised compounds of documented marks (stage 4 follow-up S4) -----
