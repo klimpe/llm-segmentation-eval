@@ -173,19 +173,30 @@ collaborative completion: two speakers, two contours, therefore two IUs. It is
 coded as a named exception and is not merged. A leading `&` with no open
 fragment for that speaker raises unless it is that known case.
 
-**Exclusions: 14 lines of 70,083.** Ten `$` non-transcription lines (Du Bois
-§14.1), three backslash-fused lines, one ambiguous-field line. Each logged with
-full content and reason. `SBC037` is additionally excluded as bilingual:
-code-switched Spanish is not the same task as monolingual English, and one file
-cannot support a separate finding.
+**Exclusions: 14 lines of 70,083, plus 235 non-participant-speaker lines
+added in the stage-4 tokeniser follow-up.** Ten `$` non-transcription lines
+(Du Bois §14.1), three backslash-fused lines, one ambiguous-field line, each
+logged with full content and reason. `SBC037` is additionally excluded as
+bilingual: code-switched Spanish is not the same task as monolingual
+English, and one file cannot support a separate finding. **A `>`-prefixed
+speaker (`>ENV`, `>DOG`, `>MAC`, `>CAT`, `>BABY`, `>HORSE`, `>RADIO`) is not
+a participant** — Du Bois's convention for an environmental/animal/machine
+sound source — and every such IU is excluded, the same way as a `$` line,
+regardless of whether it happens to tokenise to real words (confirmed,
+checked directly: 9 words total, `SBC008`/`SBC013`, excluded anyway since
+the source disqualifies it, not the content). Content logged to the
+gitignored `reports/private/`; locations and counts in the committed
+`reports/phase2_excluded_lines.csv`.
 
-**Expected IU count: 70,007.** Derivation: 70,083 raw − 10 `$` − 3 fused − 1
-ambiguous − 62 absorbed by merge. Verify the reader against the derivation, not
-the total; a discrepancy is a finding. (An earlier draft of this section said
-70,056 / 9 / 69,981 — both the raw-line and `$`-note counts were undercounts
-from early throwaway scripts, not from the corpus; see reports/phase2_data.md
-§7 for the root cause of each. The reader's actual output matches 70,007
-exactly.)
+**Expected IU count: 69,772**, not 70,007 — the `>`-prefixed exclusion is
+new this session and changes the corpus-wide baseline. Derivation: 70,083
+raw − 10 `$` − 3 fused − 1 ambiguous − 235 non-participant − 62 absorbed by
+merge. Verify the reader against the derivation, not the total; a
+discrepancy is a finding. (70,007 was correct for its own scope — before
+this exclusion existed — not a stale or wrong number superseded by
+undercounting, unlike the 70,056/9/69,981 draft this section once carried;
+see `reports/phase2_data.md` §7 for that separate history. The reader's
+actual output matches 69,772 exactly.)
 
 ### Tokenisation — decided and implemented (`sbcsae_tokenizer.py`)
 
@@ -207,17 +218,28 @@ bare slash-delimited phonetic aside (`/pub/`) — the respelling is dropped
 whole, the orthographic word before it (if any) is kept.
 
 **Removed in condition A, kept in condition B** — prosodic cues, the things a
-transcriber used to place the boundary: pauses (`...`, `..`, `...(N)`),
-inhalation `(H)` and exhalation `(Hx)` (case-folded on H/X this session —
-`(h)`, `(hx)`, `(HX)` all mean the same thing), lengthening `=`, accents `^`
-and backtick, boosters `!` and `;`, glottal stop `%`, terminal pitch `\`,
-latching `(0)`. `/` and `_` were removed from this tier this session:
-corpus-wide review found no genuine pitch-marking use of either left. `_`
-between letters is literally part of the word (`nineteen_ninety_three`,
-kept as one token, underscore included — not dropped-and-fused the way an
-embedded tier-1/2 mark is), and every other non-word use of `_`/`/` is
-covered by the phonetic-gloss rule above, is a still-undecided
-self-interruption marker (below), or (for `/`) doesn't occur.
+transcriber used to place the boundary: pauses (`...`, `..`), inhalation
+`(H)` and exhalation `(Hx)` (case-folded on H/X this session — `(h)`,
+`(hx)`, `(HX)` all mean the same thing, including case-folded lowercase
+vocal-noise names generally, e.g. `(throat)`, and the `(H=)`/`(h=)` breath-
+plus-lengthening compound), lengthening `=`, boosters `!`, glottal stop `%`.
+**Terminal pitch is gone from this tier entirely, not narrowed** — `\\`,
+`/`, and `_` were all removed this session (`\\` last: confirmed **zero**
+occurrences anywhere in the corpus, via the whole-corpus marker inventory,
+not assumed from `/`/`_`'s own removal). `_` between letters is literally
+part of the word (`nineteen_ninety_three`, kept as one token, underscore
+included — not dropped-and-fused the way an embedded tier-1/2 mark is);
+every other non-word use of `_`/`/` is covered by the phonetic-gloss rule
+above, is SBC012/SBC013's own file-local truncation-mark variant (below),
+or is a still-undecided mark-before-underscore case (`%_you`, §8 in
+`reports/phase2_tokeniser.md`).
+
+**Documented Du Bois marks confirmed absent from this corpus** (whole-
+corpus marker inventory, zero occurrences each, not inferred): accent
+caret `^`, accent backtick, booster semicolon `;`, terminal-pitch
+backslash `\\`, latching `(0)`, and the timed-pause form `...(N)`. Each is
+still a real rule in the tokeniser (raise rather than silently accept if
+one ever appears) — absent from the data, not removed from the tiers.
 
 **The boundary annotation itself — removed in BOTH conditions, but not
 tier 1**: transitional continuity punctuation `.` `,` `?` and IU truncation

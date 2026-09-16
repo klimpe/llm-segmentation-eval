@@ -2,11 +2,19 @@
 
 Working report. Not for circulation.
 
-Formerly `reports/phase2.md`, renamed to distinguish it from the reader
-report (`reports/phase2_data.md`). This revision supersedes the previous one
-throughout: several figures below changed materially in this session, and
-where they did the old number is named and corrected rather than silently
-dropped.
+**Correction, this session:** this report's own opening line used to claim
+it was "formerly `reports/phase2.md`, renamed to distinguish it from the
+reader report" — checked against full git history (`git log --all`, not
+shallow, first commit `1fffcc6`) while chasing an unrelated "173
+three-fragment, §3.3" figure the user attributed to that file: **no file
+named `reports/phase2.md` has ever existed in this repository.** The claim
+was carried forward across at least two revisions of this report without
+anyone checking it. Removed here rather than repeated a third time; see §9
+for the full "173" investigation.
+
+This revision supersedes the previous one throughout: several figures
+below changed materially in this session, and where they did the old
+number is named and corrected rather than silently dropped.
 
 ---
 
@@ -569,19 +577,23 @@ missing its repeated tag name before `>`), `*` 2, `#` 1 (§8.0b, unchanged).
 described gap, not a silent drop — none is guessed at or fixed without
 authorisation.
 
-Rerun, whole-corpus, this session: reference segments 68,718 → 63,354 (was
-68,689 → 63,392). The net +29 tokenised is not simply 29 IUs added to the
-same set — verified directly against the pre-session tokeniser: **239 IUs
-that used to raise now tokenise, and 210 that used to tokenise now raise**
-(239 − 210 = 29 exactly), the latter almost entirely the §8.1d
-self-interruption-marker IUs that a blanket tier-2 `_` cue used to swallow
-without complaint. Zero IUs that tokenised under both versions changed
-word count (checked directly, not assumed) — the zero-word total moved
-because the swapped-in and swapped-out sets have different zero-word
-compositions (many of the 239 newly-fixed are markers-only, e.g.
-`<<THUMP>>` alone; most of the 210 newly-raising carry real words around
-the `_`, e.g. "`%_you know,`"), not because any individual IU's word count
-changed.
+Rerun, whole-corpus, this session: zero-word IUs went 5,297 → 5,364 (+67);
+final (reference) segments **fell** by 38, 63,392 → 63,354 (before-dropping
+totals rose too, 68,689 → 68,718, +29). Both directions in one number each,
+not "a 38-segment increase" — that phrasing in an earlier revision of this
+section was simply wrong and is corrected here.
+
+The net +29 tokenised is not simply 29 IUs added to the same set — verified
+directly against the pre-session tokeniser: **239 IUs that used to raise
+now tokenise, and 210 that used to tokenise now raise** (239 − 210 = 29
+exactly), the latter almost entirely the §8.1d self-interruption-marker IUs
+that a blanket tier-2 `_` cue used to swallow without complaint. Zero IUs
+that tokenised under both versions changed word count (checked directly,
+not assumed) — the zero-word total moved because the swapped-in and
+swapped-out sets have different zero-word compositions (many of the 239
+newly-fixed are markers-only, e.g. `<<THUMP>>` alone; most of the 210
+newly-raising carry real words around the `_`, e.g. "`%_you know,`"), not
+because any individual IU's word count changed.
 
 ### 8.5 CLAUDE.md and this report
 
@@ -592,3 +604,201 @@ place); the lost-initial-letter rule added next to NUL/DEL in "Reading the
 corpus," parallel-structured with it since it's the same principle one
 processing stage later. This report updated (this section). Committed and
 pushed together.
+
+---
+
+## 9. Closing the tokeniser: the SBC012/SBC013 truncation variant,
+## remaining raises, the `>`-prefixed exclusion, and terminal pitch
+
+### 9.1 §8.4 wording fix
+
+Corrected in §8.4 directly: it said "38-segment increase in dropped
+zero-word IUs" for a quantity that actually *fell* by 38 (63,392 →
+63,354); zero-word IUs themselves rose by 67 (5,297 → 5,364). Both
+directions now stated explicitly, with the already-verified 239-fixed/
+210-newly-broken breakdown next to them.
+
+### 9.2 `_` in SBC012/SBC013: file-local truncation variant, confirmed
+
+Hypothesis (word_ ≈ word-, __ ≈ --) checked before implementing, per the
+brief:
+
+- **All 609 `_`, exact breakdown**: 314 (157 instances) in a standalone
+  `__` run, 160 word-internal, 101 trailing `word_`, 23 `mark_word`
+  (leading, e.g. `%_you` — not covered by the hypothesis), 4 in a
+  4-underscore run, 4 other isolated, 3 gloss-suffix. Sums to 609.
+- **Position of `__` (2+)**: 156 after-last-word, 2 no-words, **zero**
+  before-first-word or between-words — the identical 100%-IU-final
+  signature `--` has (IU_TRUNCATION: 0/0/4654/28 in the marker
+  inventory).
+- **Per-file rate, `-`/`--` vs. corpus median**: median 65.6/64.7 per
+  1000 IUs; SBC012 20.1/24.9 (rank 2/8 of 59, lowest end); SBC013
+  25.3/19.1 (rank 3/5). Both files unusually low on the ordinary marks —
+  consistent with a local substitute, not coincidence.
+- **15 raw examples** (terminal only): confirmed the pattern cleanly
+  once compound-word false positives (`Chicano_Latino`, `AFL_CIO` —
+  ordinary word-internal joins, already handled) were filtered out.
+
+**Confirmed. Implemented**: `_{2,}` → `Boundary` (same treatment as
+`--`, kind `underscore_iu_truncation`). A single `_` glued right after a
+word, not part of a run and not a gloss suffix, normalises to a literal
+`-` in the word text (new `underscore_trunc` rule kind,
+`_handle_underscore_trunc`-equivalent dispatch in `tokenize()`) — `"n_"` →
+`"n-"`. Requires an open word to attach to; `%_you`-shaped cases (mark,
+not word, before the `_`) are not this pattern and still raise. Tests:
+`test_underscore_iu_truncation_run(_no_words)`,
+`test_underscore_word_truncation`, `test_underscore_trunc_requires_open_word`.
+
+### 9.3 Remaining raises: 340 → 38 (0.06%)
+
+Implemented, each with a test and a whole-corpus count:
+
+- **(a) Compound split by a dropped delimiter** (`third]-graders`):
+  `_handle_displaced_trunc` extended with a third case — previous match
+  is any tier-1 `drop` (not lengthening/glottal), a word is open, more
+  letters glued on the other side → the delimiter is incidental, word
+  stays open. **Also covers the word-final sub-case found while
+  implementing** (`[Degener]- --`, nothing follows): same mechanism,
+  completes the word there instead (`"Degener-"`) — not a separate
+  authorisation, the mechanism the task described applies either way.
+- **(b) Leading hyphen after whitespace/pause** (`eighty .. -three`):
+  fourth case in the same function — not glued before, glued to letters
+  after → starts a new word, `"-three"`.
+- **(c) Standalone `-`, glued on neither side**: fifth case → `Boundary`
+  (`isolated_hyphen`), removed in both conditions, logged not silently
+  dropped.
+- **(d) Lowercase/mixed-case vocal-noise names**: `vocal_noise_caps`
+  widened to `[A-Za-z][A-Za-z0-9_., ]*` (was `[A-Z][A-Z0-9_., ]*`) — one
+  case-insensitive rule, not two, which also resolves a mixed-case typo
+  (`(COUGh)`) for the same reason. `(H=)`/`(h=)`/`(Hx=)`/`(hx=)` decompose
+  into breath + lengthening via a new compound rule,
+  `breath_paren_lengthening`, the unbracketed sibling of the existing
+  `breath_bracket_lengthening` (`(H[=])`).
+- **(e) Single-angle zero-content/malformed-close**: `angle_wrap`
+  (`<[A-Za-z0-9@%]+>`), the single-angle sibling of `double_angle_wrap`
+  (§8.1b), fixes `<HUMMING>` and nested-adjacent cases (`<F<VOX>...`) by
+  the identical mechanism. `angle_close_bare_missing_name`
+  (`(?<=\s)>`) drops a bare `>` after whitespace when the transcriber
+  didn't repeat the tag name (`<VOX Ugh VOX >.`) — no pairing attempted,
+  so the un-glued repeated name itself (`VOX`) still surfaces as an
+  ordinary word, same "no pairing" scope as double-angle.
+- **(f) Three named exceptions**: `#` before `5Jason` (a stray digit
+  where the numbered-overlap marker should have been); the leading `*`
+  in `*#Vodnoy` (a second, stacked disguise prefix — `#Vodnoy` was
+  already the authorised case on its own); the trailing `*` in
+  `X[3X3]*` (nothing after it to disguise the start of).
+
+**What still raises: 38 of 69,029 (0.06%)**, all newly-scoped-out territory,
+none silently guessed at:
+
+- `_` (20, 13 files): the `mark_word` shape (`%_you know`, `(Hx)_every
+  day`) — not covered by the confirmed word_/__ hypothesis, which is
+  about a word or run, not a mark, before the `_`.
+- `-` (9, 8 files): a hyphen sandwiched between two delimiters with a
+  bracket on *both* sides (`third]-[2graders...`, `Thirty2]-[3five`) —
+  the (a) fix requires the letters-after side to be an ordinary frag
+  match, and a bracket there isn't one; a literal `---` (three hyphens:
+  `--` consumes two, the third has nothing before or after to attach
+  to); `0-` (lost-initial-letter zero immediately before a hyphen, not
+  a letter — outside `lost_initial_letter`'s own lookahead, by design,
+  6 instances); `0.000000e+00-` (the float artifact immediately before
+  a hyphen instead of a letter, 1 instance, same reason).
+- `(` (8, 8 files): a vocal-noise name containing an embedded overlap
+  bracket (`(THR[OAT)]`, `(AMENS_[CHEERS]_APPLAUSE)=` — the character
+  class excludes `[`/`]`, so these don't reach `vocal_noise_caps` at
+  all); a non-breath name with an embedded `=` (`(SH=)` — the new
+  compound is `[hH][xX]?` specifically, not any name); an `@` inside
+  breath parens (`(@Hx)`); multi-level nesting (`(SNIFF .. (Hx)
+  (Hx)=)`).
+- `<` (1, 1 file): `< HI` — a space *after* `<`, the mirror-image
+  malformation of the "close missing its name" case fixed in (e), not
+  the same shape.
+
+None of these were silently absorbed into an existing rule to force the
+count to zero; each is a genuinely new shape, reported here rather than
+guessed at.
+
+### 9.4 `>`-prefixed sources: excluded as non-participants
+
+Implemented in the reader (`sbcsae_reader.py`), not the tokeniser: any
+line whose speaker starts with `>` is excluded before the `&` merge state
+machine ever sees it, logged the same way as a `$` line — `reason:
+"non_participant_speaker"`. **235 lines excluded corpus-wide.** Per the
+task: the 9 words in SBC008/SBC013 that do tokenise were not
+investigated further — the source disqualifies the line regardless of
+content, and that was already established in §8.2a.
+
+**Derivation from 70,083, new term added**:
+```
+70,083 − 10 ($) − 3 (backslash) − 1 (ambiguous) − 235 (non-participant)
+       − 62 (& absorbed) = 69,772
+```
+Reader's actual output: **69,772.** Matches. **This changes the
+corpus-wide expected-IU-count baseline from 70,007 to 69,772** — not a
+correction to the old arithmetic (which was right for what it covered),
+a new exclusion category added this session. Updated in CLAUDE.md and
+`reports/phase2_data.md` §7.
+
+Content for this category goes to `reports/private/
+phase2_excluded_non_participant_speaker_full.csv` (gitignored); the
+committed `reports/phase2_excluded_lines.csv` keeps file/line/reason for
+every row (exact locations and counts) with content redacted for this
+category only — the $-note/backslash/ambiguous rows there are unchanged
+(pre-existing content, not part of this session's ask).
+
+**Found while regenerating this: a real bug, not part of the ask,
+fixed anyway.** Rerunning `sbcsae_reader.py` to get the new derivation
+also regenerates `reports/phase2_nul_bytes.csv` — and it turned out that
+file was being written *with* full transcript context every time the
+script ran, despite CLAUDE.md and `phase2_data.md` both documenting a
+private/public split for exactly that file. The split was real in the
+documentation and in a one-off private CSV from an earlier session, but
+`sbcsae_reader.py`'s own `__main__` had never actually implemented it —
+every rerun silently overwrote the committed file with real transcript
+text. Fixed in the same commit as the exclusion work: the committed CSV
+now has file/line/byte only; full context moved to `reports/private/
+phase2_nul_bytes_full.csv`, written by the same script run.
+
+### 9.5 Validation reruns and the digit catch-all
+
+`sbcsae_tokenizer_validate.py` now prints `overlap_leftover_digit`
+firings every run (**20**, current corpus) — a number to watch, not
+just a rule to trust, per the task. Whole-corpus rerun after every
+change in this session: raises 340 → 38 (0.06%); `_` and `-` are now
+the dominant categories by a wide margin, both newly-scoped-out
+territory (§9.3), not silent gaps.
+
+### 9.6 "173 three-fragment": not found, and the report's own citation for it doesn't check out
+
+`git log -S "173 three" --all`: **zero hits**, in the full, non-shallow
+history of this repository (first commit `1fffcc6`, `git
+rev-parse --is-shallow-repository` → `false`). Broader searches (`git
+log -S "173" --all`, `git log -S "6,571" --all`) turn up nothing in any
+phase-2-related commit either. **No file named `reports/phase2.md` has
+ever existed in this repository's tracked history** — checked directly
+(`git log --all --name-only` across every commit), not assumed. This
+report's own §1 used to open by claiming it was "formerly
+`reports/phase2.md`" — that claim does not check out and has been
+removed (see §1). One line: **the "173 three-fragment, §3.3" citation
+points at a file and section that, as far as this repository's history
+shows, never existed — it isn't something I declined to reconcile, it's
+something that doesn't appear to be there to reconcile.** The real,
+current, twice-independently-verified figure remains **167
+three-fragment / 3 four-fragment** (§8.3), now further changed by this
+session's rule additions (§9.2's `_` fix removes underscore-joined
+words from the fragment count the same way as before; the net effect
+was not re-measured this session since no fragment-affecting rule
+changed after §8.3's reconciliation — flagged here rather than restated
+without rechecking).
+
+### 9.7 CLAUDE.md: terminal pitch and absent Du Bois marks
+
+Terminal pitch removed from tier 2 entirely, not narrowed to backslash —
+`\\` itself is confirmed **zero** occurrences corpus-wide (whole-corpus
+marker inventory, not inferred from `/`/`_`'s already-established
+absence). A new paragraph lists every documented Du Bois mark confirmed
+absent from this corpus by the same inventory: accent caret, accent
+backtick, booster semicolon, terminal-pitch backslash, latching `(0)`,
+and the timed-pause form `...(N)` — each still a live rule (raises
+rather than silently accepting one if it ever appears), absent from the
+data, not removed from the tiers.

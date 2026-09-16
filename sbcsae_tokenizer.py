@@ -132,7 +132,16 @@ _RULES: list[tuple[str, str, str]] = [
     # its own new tier or cue kind.
     ("compound", "glottal_breath", r"\(%(?P<gb_letter>Hx?)\)"),
     ("compound", "breath_bracket_lengthening", r"\((?P<bbl_letter>Hx?)\[=\]\)"),
-    ("drop", "vocal_noise_caps", r"\([A-Z][A-Z0-9_., ]*\)"),
+    # "(H=)"/"(h=)" (confirmed this session): the same lengthening-inside-
+    # breath-parens compound as breath_bracket_lengthening above, just
+    # without the enclosing "[=]" brackets -- decomposes the same way.
+    # Case-folded on both letters, matching breath_in/out above.
+    ("compound", "breath_paren_lengthening", r"\((?P<bpl_letter>[hH][xX]?)=\)"),
+    # Case-insensitive throughout (confirmed this session: lowercase names
+    # like "(throat)"/"(sigh)"/"(sniff)" are the same convention as the
+    # capitalised form, and this single class also resolves a mixed-case
+    # typo, "(COUGh)", for the same reason -- one convention, not two).
+    ("drop", "vocal_noise_caps", r"\([A-Za-z][A-Za-z0-9_., ]*\)"),
     # Empty parens, nothing inside (S1e, "@()", "...() (TSK)"): a
     # vocal-noise annotation the transcriber opened and closed with no
     # content -- dropped the same way a filled one would be.
@@ -181,11 +190,22 @@ _RULES: list[tuple[str, str, str]] = [
     ("drop", "double_angle_wrap", r"<<[A-Za-z][A-Za-z_\-]*>>"),
     ("drop", "double_angle_open", r"<<[A-Za-z][A-Za-z_\-]*"),
     ("drop", "double_angle_close", r"[A-Za-z][A-Za-z_\-]*>>"),
+    # Zero-content single-angle case (confirmed this session, same
+    # mechanism as double_angle_wrap above: a greedy open-pattern tried
+    # alone would consume the tag-name letters the close-pattern then has
+    # nothing left to match, raising on the bare ">"). Tried first.
+    ("drop", "angle_wrap", r"<[A-Za-z0-9@%]+>"),
     # "%" included so <% ... %> (a span-tag pair like <@ ... @>, S3.3: pairs
     # within the same IU at the same ~70% rate as <@...@>) strips the same
     # way, not just the letter/digit/@-named tags.
     ("drop", "angle_open", r"<[A-Za-z0-9@%]+"),
     ("drop", "angle_close", r"[A-Za-z0-9@%]+>"),
+    # A close missing its repeated tag name before ">" (confirmed this
+    # session: "<VOX Ugh VOX >.", "[<X Yeah >]." -- the transcriber didn't
+    # repeat the name at all, just closed with a bare ">" after a space).
+    # Same "no pairing" treatment as every other angle-tag delimiter here:
+    # stripped on sight, not verified against any particular open tag.
+    ("drop", "angle_close_bare_missing_name", r"(?<=\s)>"),
     ("drop", "at_sign", r"@+"),
     # "+": event-timing marker inside <<...>> quality spans (S3c, corrected
     # this session by cross-IU-aware scanning: of 177 occurrences, 165 sit
@@ -200,9 +220,21 @@ _RULES: list[tuple[str, str, str]] = [
     # followed by a letter: strip the prefix, the word fuses in normally
     # right after via the ordinary "frag" rule. Zero-width lookahead so
     # the letter itself isn't consumed here. Any OTHER occurrence -- not
-    # followed by a letter (X[3X3]*, #5Jason) -- still raises: this is not
-    # a general rule for these three characters, only the letter-prefix
-    # case is authorised.
+    # followed by a letter -- still raises: this is not a general rule for
+    # these three characters, only the letter-prefix case is authorised.
+    # Three named, logged, one-off exceptions to that, all confirmed this
+    # session:
+    #   - "[#5Jason #Dill5]": "#" directly before a digit, not a letter --
+    #     strip just the "#"; the digit that follows falls to
+    #     overlap_leftover_digit above, and "Jason" then fuses normally.
+    #   - "*#Vodnoy": a second, stacked disguise prefix -- strip the
+    #     leading "*"; "#Vodnoy" is then the already-authorised letter-
+    #     prefix case on its own.
+    #   - "X[3X3]*": a trailing "*" with nothing after it at all -- strip
+    #     it; there is no word for it to disguise the start of.
+    ("drop", "jason_hash_digit_named_exception", r"#(?=5Jason)"),
+    ("drop", "stacked_disguise_prefix_named_exception", r"\*(?=#[^\W\d_])"),
+    ("drop", "star_trailing_named_exception", r"\*(?!\S)"),
     ("drop", "disguise_prefix", r"[~#*](?=[^\W\d_])"),
     # Lost-initial-letter corruption: one phenomenon, three surface shapes,
     # unified with the reader's NUL/DEL-byte handling (sbcsae_reader.py) --
@@ -240,12 +272,14 @@ _RULES: list[tuple[str, str, str]] = [
     # handled by name.
     ("drop", "overlap_leftover_digit", r"\d+"),
     ("boundary", "iu_truncation", r"--"),
-    # A single hyphen, not part of "--", that survived the word-fragment
-    # rule below because something else (lengthening or glottal) sat
-    # between it and the last letter -- "b=-", "%-". Whether it fuses onto
-    # a word or stands alone as a mark-only token is decided in
-    # tokenize(); anything not immediately preceded by a glued lengthening
-    # or glottal mark still raises (see _handle_displaced_trunc).
+    # A single hyphen, not part of "--", in one of five authorised shapes
+    # -- see _handle_displaced_trunc for all five: displaced past a
+    # lengthening/glottal mark ("b=-", "%-"); a compound split by a
+    # dropped delimiter ("third]-graders", confirmed this session); a
+    # leading hyphen starting a word ("eighty .. -three", confirmed this
+    # session); or a standalone hyphen glued to nothing on either side
+    # (confirmed this session, removed in both conditions). Anything else
+    # still raises -- this is not a general orphan-hyphen rule.
     ("displaced_trunc", "displaced_truncation", r"-(?!-)"),
     ("cue", "lengthening", r"="),
     ("cue", "accent_caret", r"\^"),
@@ -254,24 +288,39 @@ _RULES: list[tuple[str, str, str]] = [
     ("cue", "booster_semi", r";"),
     ("cue", "glottal", r"%"),
     ("cue", "pitch_backslash", r"\\"),
-    # "_" and "/" were reclassified this session (S1d): neither is a
-    # terminal-pitch cue. Corpus-wide breakdown of every occurrence found
-    # no genuine pitch-marking use of either character left -- "/" is
-    # exclusively the delimiter of a slash-bracketed phonetic respelling
-    # ("/god/"), and "_" is exclusively (a) a word-internal compound
-    # joiner (handled directly in the "word" pattern below, not here --
-    # "part of the word" per the task, not a mark that fuses by omission),
-    # (b) the leading character of a phonetic-gloss suffix attached to a
-    # word ("good_/god/", "cello_(/cheller/)"), or (c) a self-interruption/
-    # abandoned-utterance marker (trailing "word_", or standalone "__"),
-    # overwhelmingly concentrated in SBC012/SBC013 and NOT authorised by
-    # this rule -- still raises, reported separately, not guessed at here.
+    # "_" and "/" were reclassified out of tier 2 last session: neither is
+    # a terminal-pitch cue. "/" is exclusively the delimiter of a
+    # slash-bracketed phonetic respelling ("/god/"). "_" is (a) a
+    # word-internal compound joiner (handled directly in the "word"
+    # pattern below -- "part of the word", not a mark that fuses by
+    # omission), (b) the leading character of a phonetic-gloss suffix
+    # ("good_/god/"), or (c) -- confirmed this session, not guessed --
+    # SBC012/SBC013's own file-local variant of the standard truncation
+    # marks: standalone "__" (2+) is that file pair's "--", and a trailing
+    # "word_" is that file pair's "word-". Evidence: "__" has the exact
+    # same corpus-wide position signature as "--" (100% IU-final: 156
+    # after-last-word + 2 no-words, zero before/between); both files rank
+    # in the bottom 3-8 of 59 for ordinary "-"/"--" rate (SBC012 20/25 per
+    # 1000 IUs vs a corpus median of 66/65; SBC013 25/19) -- exactly what
+    # a local substitute convention predicts. See the boundary rule for
+    # "__" and the underscore_trunc kind for "word_" below.
     #
     # A phonetic-gloss suffix is dropped whole -- the slash-delimited
     # respelling is not the orthographic word either, so it isn't kept:
     # only the word before the "_" survives, per the "kept always" tier-3
     # rule already covering that word on its own.
     ("drop", "word_gloss_suffix", r"_\(?/[^/]*/\)?"),
+    # SBC012/SBC013's "--" equivalent: tried before the single-"_" rule
+    # below so a run is never partially eaten by it.
+    ("boundary", "underscore_iu_truncation", r"_{2,}"),
+    # SBC012/SBC013's "word-" equivalent: a single "_" glued right after a
+    # word, not part of a run and not a gloss suffix (both already claimed
+    # above). Handled specially in tokenize() (_handle_underscore_trunc):
+    # normalises to a literal "-" in the word text, exactly like "word-"
+    # elsewhere in the corpus, and only when a word is actually open to
+    # attach it to -- a "_" glued to something else (a mark, a bracket)
+    # is not this pattern and still raises.
+    ("underscore_trunc", "underscore_truncation", r"_(?!_)"),
     # A bare (not "_"-attached) slash-delimited phonetic-gloss aside --
     # same annotation, just standing alone rather than suffixed to a word
     # (2 IUs, S1d). Dropped whole for the same reason as the suffixed form.
@@ -440,25 +489,56 @@ def tokenize(text: str) -> list[TokenItem]:
             # sandwiched into a word -- these compounds are always
             # self-contained parenthetical material, like a plain (H).
             flush_word()
-            group = m.group("gb_letter" if name == "glottal_breath" else "bbl_letter")
-            breath_kind = "breath_out" if group == "Hx" else "breath_in"
             if name == "glottal_breath":
+                group = m.group("gb_letter")
+                breath_kind = "breath_out" if group.lower() == "hx" else "breath_in"
                 items.append(Cue(kind="glottal", raw="%"))
                 items.append(Cue(kind=breath_kind, raw=f"({group})"))
-            else:  # breath_bracket_lengthening
+            elif name == "breath_bracket_lengthening":
+                group = m.group("bbl_letter")
+                breath_kind = "breath_out" if group.lower() == "hx" else "breath_in"
                 items.append(Cue(kind=breath_kind, raw=f"({group}["))
                 items.append(Cue(kind="lengthening", raw="=])"))
+            else:  # breath_paren_lengthening: "(H=)"/"(h=)", case-folded
+                group = m.group("bpl_letter")
+                breath_kind = "breath_out" if group.lower() == "hx" else "breath_in"
+                items.append(Cue(kind=breath_kind, raw=f"({group}"))
+                items.append(Cue(kind="lengthening", raw="=)"))
             continue
 
         if kind == "displaced_trunc":
-            was_active = pending_active
-            _handle_displaced_trunc(
+            action = _handle_displaced_trunc(
                 matches, i, text, glued, pending_active, pending_norm_pieces, pending_raw_pieces, items
             )
-            if was_active:
+            if action == "flush":
                 # The hyphen completed the pending word (attached case):
                 # flush it now, since truncation always ends a word.
                 flush_word()
+            elif action in ("keep_open", "start_new"):
+                # The hyphen continues into more letters -- a compound
+                # split by a delimiter ("third]-graders") or a leading
+                # hyphen starting a word ("eighty .. -three") -- do not
+                # flush; the next frag match appends onto what's pending.
+                pending_active = True
+            elif action == "isolated":
+                flush_word()
+                items.append(Boundary(kind="isolated_hyphen", raw="-"))
+            # "cue_only": nothing further to do.
+            continue
+
+        if kind == "underscore_trunc":
+            # SBC012/SBC013's "word_" == elsewhere's "word-" (confirmed,
+            # not guessed -- see the rule table comment above). Only when
+            # a word is actually open to attach it to: a "_" glued to
+            # something else (a mark, a bracket -- e.g. "%_you") is not
+            # this pattern and still raises, matching "y-"'s own treatment
+            # of a leading vs. trailing hyphen.
+            if glued and pending_active:
+                pending_norm_pieces.append("-")
+                pending_raw_pieces.append("-")
+                flush_word()
+            else:
+                _raise_unrecognised(text, "_", m.start())
             continue
 
     flush_word()
@@ -469,39 +549,81 @@ def _handle_displaced_trunc(
     matches: list[re.Match],
     i: int,
     text: str,
-    glued: bool,
+    glued_before: bool,
     pending_active: bool,
     pending_norm_pieces: list[str],
     pending_raw_pieces: list[str],
     items: list[TokenItem],
-) -> None:
-    """A single hyphen displaced from its word by an intervening lengthening
-    or glottal mark ("b=-", "%-") -- authorised, named handling for exactly
-    this compound, not a general rule for orphan hyphens.
+) -> str:
+    """A single hyphen not part of "--", in one of four authorised shapes.
+    Returns an action for the caller: "flush" (word is complete, flush
+    it), "keep_open" or "start_new" (word continues -- caller must not
+    flush and must ensure pending_active is True for the next frag match
+    to attach to), or "cue_only" (nothing else to do). Raises for anything
+    outside these four shapes -- this is not a general orphan-hyphen rule.
 
-    If a word is still open (the mark was embedded/sandwiched into it),
-    the hyphen completes that word: "b=-" tokenises to the one word "b-",
-    keeping the truncation hyphen with the word per the same "kept always"
-    tier-3 treatment as a plain "y-". If no word is open (the mark stood
-    alone, e.g. "%-"), the hyphen becomes its own Cue rather than a word --
-    CLAUDE.md's tiers don't say whether a mark-only run like this is a
-    word, and this function does not decide that either; it is left
-    countable (as a "displaced_truncation" Cue with no preceding Word) and
-    excluded from the word sequence. Anything else -- a hyphen not
-    directly preceded by a glued lengthening/glottal mark -- still raises:
-    this is not a general orphan-hyphen rule.
+    1. **Displaced truncation** ("b=-", "%-"): a hyphen displaced from its
+       word by an intervening lengthening/glottal mark. Word-final --
+       "b=-" tokenises to the one word "b-", same "kept always" treatment
+       as a plain "y-". "flush".
+    2. **The same mark, with no word open** ("%-" alone): the hyphen
+       becomes its own Cue, not a word -- CLAUDE.md's tiers don't say
+       whether a mark-only run like this is a word, and this function
+       does not decide that either. "cue_only".
+    3. **A dropped delimiter incidental to the word's own hyphen**
+       ("third]-graders", confirmed this session): the previous match is
+       some other tier-1 "drop" delimiter (not lengthening/glottal) and a
+       word is open. Two sub-cases, same mechanism either way -- the
+       delimiter is incidental, the hyphen is the word's own, not a
+       reason to end it prematurely: if more letters follow glued on the
+       other side ("graders"), the word stays open for them, "keep_open";
+       if nothing does ("[Degener]- --", a truncated word whose own
+       truncation hyphen happens to be displaced by a bracket), the
+       hyphen instead completes the word right there, same as a plain
+       "y-", "flush".
+    4. **A leading hyphen starting a word** ("eighty .. -three", confirmed
+       this session): not glued to anything before (so no word is open --
+       verified by construction, since every other kind flushes on a
+       non-glued transition before this point is ever reached), but glued
+       to letters after -- mirrors "y-"'s trailing form. "start_new".
+    5. **A standalone hyphen, glued on neither side** (confirmed this
+       session): removed in both conditions, logged rather than silently
+       dropped -- the caller appends a Boundary. "isolated".
     """
-    if not (glued and i > 0):
-        _raise_unrecognised(text, "-", matches[i].start())
-    prev = matches[i - 1]
-    if prev.lastgroup not in ("lengthening", "glottal"):
+    glued_after = (
+        i + 1 < len(matches)
+        and _is_glued(text, matches[i].end(), matches[i + 1].start())
+        and _KIND_OF[matches[i + 1].lastgroup] == "frag"
+    )
+
+    if glued_before and i > 0:
+        prev_name = matches[i - 1].lastgroup
+        if prev_name in ("lengthening", "glottal"):
+            if pending_active:
+                pending_norm_pieces.append("-")
+                pending_raw_pieces.append("-")
+                return "flush"
+            items.append(Cue(kind="displaced_truncation", raw="-"))
+            return "cue_only"
+        if pending_active and _KIND_OF[prev_name] == "drop":
+            pending_norm_pieces.append("-")
+            pending_raw_pieces.append("-")
+            return "keep_open" if glued_after else "flush"
         _raise_unrecognised(text, "-", matches[i].start())
 
-    if pending_active:
+    if not glued_before and glued_after:
         pending_norm_pieces.append("-")
         pending_raw_pieces.append("-")
-    else:
-        items.append(Cue(kind="displaced_truncation", raw="-"))
+        return "start_new"
+
+    if not glued_before and not glued_after:
+        # 5. A standalone "-" with nothing glued on either side (confirmed
+        # this session): not a truncation, not a compound -- a bare, free-
+        # floating dash. Removed in both conditions, same as a Boundary,
+        # but logged as its own kind rather than silently absent.
+        return "isolated"
+
+    _raise_unrecognised(text, "-", matches[i].start())
 
 
 def words_only(items: list[TokenItem]) -> list[Word]:

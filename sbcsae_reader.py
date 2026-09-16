@@ -212,7 +212,7 @@ def read_trn_document(path: Path) -> tuple[str, list[IntonationUnit], int, list[
     single IntonationUnits, keyed by speaker (never by file position --
     concurrent threads from different speakers are common).
 
-    Three categories of line are excluded before merging, each logged
+    Four categories of line are excluded before merging, each logged
     rather than silently dropped:
       - Du Bois-convention researcher notes: a line whose text begins with
         '$' (Du Bois, "Outline of Discourse Transcription," SS14.1 -- marks
@@ -227,6 +227,13 @@ def read_trn_document(path: Path) -> tuple[str, list[IntonationUnit], int, list[
         non-blank fields is the real text (AmbiguousFieldsError). 1 in the
         whole corpus (SBC016 line 1185). Same principle as the backslash
         lines: excluded and logged, not guessed.
+      - A ">"-prefixed speaker (>ENV, >DOG, >MAC, >CAT, >BABY, >HORSE,
+        >RADIO) -- Du Bois's convention for an environmental/animal/
+        machine sound source, not a participant. Confirmed this session
+        (reports/phase2_tokeniser.md): checked directly, not assumed --
+        the handful of these lines that do tokenise to real words
+        (SBC008/SBC013, 9 words total) are excluded on the same standard
+        regardless, since the source is still not a participant.
 
     Returns (doc_id, units, n_raw_lines, nul_log_rows, excluded_rows).
     n_raw_lines counts every non-blank line, excluded or not, matching the
@@ -289,6 +296,21 @@ def read_trn_document(path: Path) -> tuple[str, list[IntonationUnit], int, list[
         if speaker is None:
             raise RuntimeError(f"{doc_id}: line before any speaker was established: {raw_line!r}")
 
+        if speaker.startswith(">"):
+            # A ">"-prefixed source (>ENV, >DOG, >MAC, ...) is Du Bois's
+            # convention for an environmental/animal/machine sound, not a
+            # participant -- confirmed this session (reports/
+            # phase2_tokeniser.md): even where such a line tokenises to
+            # real words (SBC008/SBC013, 9 words total), it is not a
+            # participant's speech and does not belong in the reference.
+            # Excluded the same way as a "$" line -- logged, not guessed,
+            # never merged or continued into by the "&" state machine
+            # below (there is nothing to merge: the line is gone).
+            excluded_rows.append(
+                {"file": doc_id, "line": line_no, "reason": "non_participant_speaker", "content": raw_line}
+            )
+            continue
+
         stripped = raw_text.strip()
         leading_amp = stripped.startswith("&")
         trailing_amp = stripped.endswith("&")
@@ -346,6 +368,8 @@ def iter_trn_documents(
 if __name__ == "__main__":
     reports_dir = Path("reports")
     reports_dir.mkdir(exist_ok=True)
+    private_dir = Path("reports/private")
+    private_dir.mkdir(parents=True, exist_ok=True)
 
     from collections import Counter
 
@@ -387,7 +411,17 @@ if __name__ == "__main__":
     print("=== Stage 1: NUL/DEL bytes stripped ===")
     by_byte = Counter(row["byte"] for row in all_nul_rows)
     print(f"total control bytes removed: {len(all_nul_rows)} {dict(by_byte)} (this check covers all 60 files)")
+    # Locations only in the committed CSV; full context (real transcript
+    # text) stays in the gitignored private one -- this split was
+    # documented in CLAUDE.md/phase2_data.md but this script never
+    # actually implemented it (it wrote context straight into the
+    # committed file every time it ran); fixed here, caught by rerunning
+    # this script for the S4 exclusion derivation and noticing the diff.
     with open(reports_dir / "phase2_nul_bytes.csv", "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=["file", "line", "byte"])
+        w.writeheader()
+        w.writerows({"file": r["file"], "line": r["line"], "byte": r["byte"]} for r in all_nul_rows)
+    with open(private_dir / "phase2_nul_bytes_full.csv", "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=["file", "line", "byte", "context"])
         w.writeheader()
         w.writerows(all_nul_rows)
@@ -402,15 +436,31 @@ if __name__ == "__main__":
     print(f"alarm characters present (U+FFFD, \\r, \\x00): {alarms if alarms else 'none'}")
     print(f"full inventory written to {reports_dir / 'phase2_char_inventory.txt'}")
 
-    print("\n=== Excluded lines (Du Bois '$' notes + backslash-fused) ===")
+    print("\n=== Excluded lines (Du Bois '$' notes + backslash-fused + non-participant speaker) ===")
+    # Content for the non-participant-speaker category goes to reports/
+    # private/ only (it's real transcript text, sometimes real spoken
+    # words -- SBC008/SBC013 -- not just annotator notes like the other
+    # three categories); the committed CSV keeps file/line/reason for that
+    # category (exact locations and counts) but redacts content.
+    committed_rows = [
+        (row if row["reason"] != "non_participant_speaker" else {**row, "content": ""})
+        for row in all_excluded_rows
+    ]
     with open(reports_dir / "phase2_excluded_lines.csv", "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=["file", "line", "reason", "content"])
         w.writeheader()
-        w.writerows(all_excluded_rows)
+        w.writerows(committed_rows)
+    with open(
+        private_dir / "phase2_excluded_non_participant_speaker_full.csv", "w", newline="", encoding="utf-8"
+    ) as f:
+        w = csv.DictWriter(f, fieldnames=["file", "line", "reason", "content"])
+        w.writeheader()
+        w.writerows(r for r in all_excluded_rows if r["reason"] == "non_participant_speaker")
     by_reason = Counter(r["reason"] for r in all_excluded_rows)
     print(f"total excluded: {len(all_excluded_rows)}  by reason: {dict(by_reason)}")
     for row in all_excluded_rows:
-        print(f"  {row['file']} line {row['line']} [{row['reason']}]: {row['content']!r}")
+        shown = row["content"] if row["reason"] != "non_participant_speaker" else "[redacted -- see reports/private/]"
+        print(f"  {row['file']} line {row['line']} [{row['reason']}]: {shown!r}")
 
     print("\n=== Stage 2 (audit): raw tab-field-count distribution, ALL non-blank lines ===")
     for n_fields, count in sorted(per_file_field_counts_raw.items()):
@@ -446,19 +496,25 @@ if __name__ == "__main__":
     n_dollar = by_reason.get("dubois_dollar_note", 0)
     n_backslash = by_reason.get("backslash_fused", 0)
     n_ambiguous = by_reason.get("ambiguous_fields", 0)
+    n_non_participant = by_reason.get("non_participant_speaker", 0)
     n_amp_absorbed = sum(row["merges"] for row in per_file_summary)
-    expected = total_raw_lines - n_dollar - n_backslash - n_ambiguous - n_amp_absorbed
+    expected = (
+        total_raw_lines - n_dollar - n_backslash - n_ambiguous - n_non_participant - n_amp_absorbed
+    )
 
     print(f"\n{total_raw_lines} raw lines")
     print(f"-  {n_dollar}    $ non-transcription lines")
     print(f"-  {n_backslash}    backslash-fused lines")
     print(f"-  {n_ambiguous}    ambiguous-field line")
+    print(f"-  {n_non_participant}   non-participant (\">\"-prefixed) speaker lines")
     print(f"-  {n_amp_absorbed}   absorbed by & merge")
     print(f"=  {expected}")
     print(f"\nactual merged IU count: {total_merged_units}")
-    # expected is derived from these same five live counters, so this match
+    # expected is derived from these same six live counters, so this match
     # is close to definitional; the real check is each counter against the
-    # figure it was independently established at:
+    # figure it was independently established at. "non-participant" has no
+    # prior figure to check against -- it's new this session -- so it's
+    # reported without a prior/OK comparison, not silently folded in.
     for label, actual, prior in [
         ("raw lines", total_raw_lines, 70083),
         ("$ notes", n_dollar, 10),
@@ -468,6 +524,7 @@ if __name__ == "__main__":
     ]:
         flag = "OK" if actual == prior else f"MISMATCH (previously established: {prior})"
         print(f"  {label}: {actual}  [{flag}]")
+    print(f"  non-participant speaker lines: {n_non_participant}  [new this session, no prior figure]")
     if total_merged_units == expected:
         print(f"\nOK: matches {expected} exactly.")
     else:

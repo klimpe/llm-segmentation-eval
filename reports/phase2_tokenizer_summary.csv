@@ -1,10 +1,11 @@
 metric,value
-n_ius,69029
-n_raised,311
-raise_rate,0.0045
-n_tokenised,68718
-n_zero_word_ius,5364
+n_ius,68815
+n_raised,38
+raise_rate,0.0006
+n_tokenised,68777
+n_zero_word_ius,5170
 files_with_zero_word_ius,59
-mean_words_per_iu,3.5814
+mean_words_per_iu,3.5909
 max_words_per_iu,21
 n_ab_mismatches,0
+n_overlap_leftover_digit_firings,20

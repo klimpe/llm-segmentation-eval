@@ -29,7 +29,7 @@ from pathlib import Path
 
 from sbcsae_marker_inventory import find_line_number
 from sbcsae_reader import iter_trn_documents
-from sbcsae_tokenizer import TokenizeError, tokenize, words_only
+from sbcsae_tokenizer import TokenizeError, _raw_matches, tokenize, words_only
 
 _LEADING_SYMBOL_RE = re.compile(r"unrecognised symbol U\+([0-9A-Fa-f]+)")
 
@@ -97,12 +97,19 @@ def main():
     per_file_reference = Counter()  # segments "after" (reference_segments())
     words_per_iu = Counter()
     n_ab_mismatch = 0  # see note below: structurally impossible here
+    n_overlap_leftover_digit = 0  # how often the low-priority digit
+    # catch-all actually fires -- printed every run so a future rule
+    # change that starts silently swallowing more than intended shows up
+    # as a number moving, not as something only found by reading code.
 
     for doc_id, units, *_ in iter_trn_documents():
         if doc_id == "SBC037":
             continue
         for u in units:
             n_ius += 1
+            n_overlap_leftover_digit += sum(
+                1 for m in _raw_matches(u.text) if m.lastgroup == "overlap_leftover_digit"
+            )
             try:
                 items = tokenize(u.text)
             except TokenizeError as e:
@@ -173,6 +180,11 @@ def main():
     print(f"\n--- A/B word-sequence identity mismatches: {n_ab_mismatch} "
           f"(structurally impossible given tokenize()'s single-pass design; "
           f"see module docstring) ---")
+
+    print(f"\n--- overlap_leftover_digit firings: {n_overlap_leftover_digit} "
+          f"(the low-priority digit catch-all -- printed every run, per S4 "
+          f"of the tokeniser report, so any future rule change that starts "
+          f"swallowing more than intended shows up as a number moving) ---")
 
     reports_dir = Path("reports")
     reports_dir.mkdir(exist_ok=True)
@@ -245,6 +257,7 @@ def main():
             ("mean_words_per_iu", round(total_words / total_tokenised, 4)),
             ("max_words_per_iu", max(words_per_iu)),
             ("n_ab_mismatches", n_ab_mismatch),
+            ("n_overlap_leftover_digit_firings", n_overlap_leftover_digit),
         ]:
             w.writerow({"metric": metric, "value": value})
 

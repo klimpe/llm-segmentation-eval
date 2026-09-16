@@ -1,9 +1,9 @@
 composition,count
-nonwords_in_overlap_brackets,3432
-other,1036
+nonwords_in_overlap_brackets,3372
+other,989
 laughter_only,264
-breath_only,242
-vocal_noise_only,200
-comment_only,111
+breath_only,241
+vocal_noise_only,199
 raw_empty,51
 pause_only,28
+comment_only,26

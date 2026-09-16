@@ -312,10 +312,22 @@ def main():
                 {"pattern": label, "file": doc_id, "line": line_no or "", "text": iu_text}
             )
 
-    # Short illustrative quotations only (<=3 per pattern, per the licence
-    # note in reports/phase2_data.md -- same category of use as the
-    # existing reports/phase2_excluded_lines.csv).
+    # Same private/public split as the reader's NUL-byte CSVs (fixed
+    # there, `sbcsae_reader.py`, stage-4 follow-up): transcript text is
+    # real corpus content regardless of how short the excerpt is, so it
+    # goes to the gitignored reports/private/ only. The committed CSV
+    # keeps pattern/file/line -- exact locations and counts -- with no
+    # text column at all, not an empty one, so a future column-order
+    # change can't silently reintroduce content through it.
+    private_dir = Path("reports/private")
+    private_dir.mkdir(parents=True, exist_ok=True)
     with open(reports_dir / "phase2_marker_no_tier_examples.csv", "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=["pattern", "file", "line"])
+        w.writeheader()
+        w.writerows({"pattern": r["pattern"], "file": r["file"], "line": r["line"]} for r in example_rows)
+    with open(
+        private_dir / "phase2_marker_no_tier_examples_full.csv", "w", newline="", encoding="utf-8"
+    ) as f:
         w = csv.DictWriter(f, fieldnames=["pattern", "file", "line", "text"])
         w.writeheader()
         w.writerows(example_rows)

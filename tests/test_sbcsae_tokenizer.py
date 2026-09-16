@@ -200,6 +200,32 @@ def test_breath_out_mixed_case_hx():
     assert [w.text for w in words_only(items)] == ["word", "here"]
 
 
+def test_lowercase_vocal_noise_dropped():
+    items = tokenize("(throat) word")
+    assert [w.text for w in words_only(items)] == ["word"]
+
+
+def test_mixed_case_vocal_noise_dropped():
+    items = tokenize("(COUGh) word")
+    assert [w.text for w in words_only(items)] == ["word"]
+
+
+def test_breath_paren_lengthening_uppercase():
+    items = tokenize("(H=) word")
+    assert [w.text for w in words_only(items)] == ["word"]
+    assert [it.kind for it in items if isinstance(it, Cue)][:2] == ["breath_in", "lengthening"]
+
+
+def test_breath_paren_lengthening_lowercase():
+    items = tokenize("(h=) word")
+    assert [it.kind for it in items if isinstance(it, Cue)][:2] == ["breath_in", "lengthening"]
+
+
+def test_breath_paren_lengthening_hx():
+    items = tokenize("(Hx=) word")
+    assert [it.kind for it in items if isinstance(it, Cue)][:2] == ["breath_out", "lengthening"]
+
+
 def test_empty_parens_dropped():
     items = tokenize("@() word")
     assert [w.text for w in words_only(items)] == ["word"]
@@ -285,17 +311,12 @@ def test_continuity_punctuation_not_a_token():
         "~ Mae",  # disguise prefix NOT immediately followed by a letter (a
         # space intervenes) -- only the glued letter-prefix case is
         # authorised (see S2 tests below).
-        "X[3X3]*",  # trailing '*' with nothing after it -- same reason.
-        "[#5Jason]",  # '#' followed by a digit, not a letter -- still raises.
         "KENDRA: text",  # colon: not a documented marker (a settled reader bug used to
         # leak this into IU text; the reader is now fixed so this string
         # should never actually reach the tokeniser -- but the tokeniser
         # itself still has no rule for a bare colon and must still raise
         # if handed one directly).
         "Oh,\x7f",  # stray control byte
-        ".. s- - --",  # an isolated hyphen with nothing to its immediate left --
-        # NOT the authorised b=-/%- compound (no glued lengthening/glottal
-        # mark precedes it) -- still raises.
         "((RANDOM_COMMENT) word",  # a single-paren-closed researcher comment
         # that is NOT the one named exception (DOG_BARKING_BEGINS) -- still
         # raises rather than silently accepting any malformed comment.
@@ -373,17 +394,73 @@ def test_underscore_word_internal_kept_literally():
     assert [w.text for w in words_only(items)] == ["nineteen_ninety_three", "happened"]
 
 
-def test_underscore_trailing_self_interruption_still_raises():
-    # Not authorised: a trailing "_" after a word, not followed by a
-    # letter or a gloss -- the self-interruption marker found in SBC012/
-    # SBC013, reported but not decided this session.
-    with pytest.raises(TokenizeError):
-        tokenize("some t_ thing")
+def test_underscore_iu_truncation_run():
+    # SBC012/SBC013's "__" == elsewhere's "--": confirmed this session
+    # (same 100% IU-final position signature as "--").
+    items = tokenize("well __")
+    assert [w.text for w in words_only(items)] == ["well"]
+    assert [it.kind for it in items if isinstance(it, Boundary)] == ["underscore_iu_truncation"]
 
 
-def test_bare_double_underscore_still_raises():
+def test_underscore_iu_truncation_run_no_words():
+    items = tokenize("__")
+    assert words_only(items) == []
+
+
+def test_underscore_word_truncation():
+    # SBC012/SBC013's "word_" == elsewhere's "word-".
+    items = tokenize("some t_ thing")
+    assert [w.text for w in words_only(items)] == ["some", "t-", "thing"]
+
+
+def test_hyphen_compound_split_by_delimiter():
+    # "third]-graders": the overlap-close bracket is incidental; the
+    # hyphen is the compound's own and the word continues through it.
+    items = tokenize("[third]-graders are here")
+    assert [w.text for w in words_only(items)] == ["third-graders", "are", "here"]
+
+
+def test_hyphen_compound_split_by_delimiter_word_final():
+    # "[Degener]- --": the bracket displaces the word's own truncation
+    # hyphen but nothing follows it -- completes the word right there,
+    # same mechanism as the continuing case, just nothing to continue
+    # into.
+    items = tokenize("[Degener]- --")
+    assert [w.text for w in words_only(items)] == ["Degener-"]
+
+
+def test_hyphen_leading_word_after_pause():
+    # "eighty .. -three": mirror of the trailing "y-" truncation form.
+    items = tokenize("eighty .. -three")
+    assert [w.text for w in words_only(items)] == ["eighty", "-three"]
+
+
+def test_real_corpus_isolated_hyphen_between_truncation_and_iu_truncation():
+    # ".. s- - --": a truncated word ("s-", the word pattern's own
+    # trailing-hyphen support, not displaced_trunc at all), an isolated
+    # hyphen (space on both sides), and IU truncation -- three distinct
+    # authorised shapes in one real IU, previously a raise wholesale.
+    items = tokenize(".. s- - --")
+    assert [w.text for w in words_only(items)] == ["s-"]
+    assert [it.kind for it in items if isinstance(it, Boundary)] == [
+        "isolated_hyphen",
+        "iu_truncation",
+    ]
+
+
+def test_isolated_hyphen_removed_both_conditions():
+    items = tokenize("okay - well")
+    words = words_only(items)
+    assert [w.text for w in words] == ["okay", "well"]
+    assert [it.kind for it in items if isinstance(it, Boundary)] == ["isolated_hyphen"]
+    assert render(items, Condition.B) == "okay well"
+
+
+def test_underscore_trunc_requires_open_word():
+    # Not authorised: "_" glued to a mark, not a word (e.g. "%_you") --
+    # the hypothesis covers word_, not mark_word.
     with pytest.raises(TokenizeError):
-        tokenize("well __")
+        tokenize("coming%_you know")
 
 
 def test_plus_dropped_inside_tag_span():
@@ -399,6 +476,42 @@ def test_plus_fuses_mid_word():
 def test_plus_standalone_dropped():
     items = tokenize("+money.")
     assert [w.text for w in words_only(items)] == ["money"]
+
+
+def test_jason_hash_digit_named_exception():
+    items = tokenize("[#5Jason #Dill5],")
+    assert [w.text for w in words_only(items)] == ["Jason", "Dill"]
+
+
+def test_stacked_disguise_prefix_named_exception():
+    items = tokenize("*#Vodnoy,")
+    assert [w.text for w in words_only(items)] == ["Vodnoy"]
+
+
+def test_star_trailing_named_exception():
+    items = tokenize("X[3X3]*")
+    words = words_only(items)
+    assert len(words) == 1
+    assert words[0].text == "XX"
+
+
+def test_single_angle_zero_content_wrap():
+    items = tokenize("<HUMMING> word")
+    assert [w.text for w in words_only(items)] == ["word"]
+
+
+def test_single_angle_nested_zero_content():
+    items = tokenize("<F<VOX> word VOX>,")
+    assert [w.text for w in words_only(items)] == ["word"]
+
+
+def test_angle_close_bare_missing_name():
+    # "<VOX Ugh VOX >.": the transcriber didn't repeat the name before
+    # ">", just a bare ">" after a space -- stripped, no pairing attempted
+    # (so the un-glued repeated "VOX" is not specially recognised either,
+    # same "no pairing" scope as double-angle).
+    items = tokenize("<VOX Ugh VOX >.")
+    assert [w.text for w in words_only(items)] == ["Ugh", "VOX"]
 
 
 def test_double_angle_open_only_no_close_in_iu():

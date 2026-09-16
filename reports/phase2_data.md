@@ -299,7 +299,24 @@ worth pursuing on its own later.
 = 70,007
 ```
 
-Reader's actual output: **70,007.** Matches.
+Reader's actual output: **70,007.** Matches, as of this stage. **Superseded
+by a sixth term, added in the stage-4 tokeniser follow-up** (not a
+correction to this arithmetic — it was right for what it covered — but a
+new exclusion category this stage didn't have reason to consider yet):
+
+```
+   70,083  raw lines
+-      10  $ non-transcription lines
+-       3  backslash-fused lines
+-       1  ambiguous-field line
+-     235  non-participant ">"-prefixed speaker lines (>ENV, >DOG, >MAC,
+           >CAT, >BABY, >HORSE, >RADIO -- Du Bois's convention for an
+           environmental/animal/machine sound source, not a participant)
+-      62  absorbed by & merge
+= 69,772
+```
+
+Reader's actual output, current code: **69,772.** Matches.
 
 **This is not the number stated going into this stage (69,981), and the
 disagreement is real, not a rounding difference — two separate errors in
