@@ -1,5 +1,2 @@
 char,codepoint,count,files,reason
-_,U+005F,20,13,"self-interruption/abandoned-utterance marker (trailing 'word_' or standalone '__'), concentrated in SBC012/SBC013 -- found S1d, not authorised"
--,U+002D,9,8,"orphaned hyphen: a hyphenated compound split by an overlap bracket or other tier-1 delimiter, or an isolated dash with nothing glued to its left -- found S0a, not authorised"
-(,U+0028,8,8,"case-folded or mark-embedded vocal-noise annotation not covered by S1e (a lowercase name, e.g. '(throat)', or a mark such as '=' glued inside plain parens, e.g. '(H=)') -- not authorised"
-<,U+003C,1,1,"single-angle tag, same as '>' above -- not authorised"
+(,U+0028,5,5,"case-folded or mark-embedded vocal-noise annotation not covered by S1e (a lowercase name, e.g. '(throat)', or a mark such as '=' glued inside plain parens, e.g. '(H=)') -- not authorised"

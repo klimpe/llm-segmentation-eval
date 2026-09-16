@@ -429,6 +429,16 @@ def test_hyphen_compound_split_by_delimiter_word_final():
     assert [w.text for w in words_only(items)] == ["Degener-"]
 
 
+def test_hyphen_between_two_brackets_fuses():
+    # "third]-[2graders": delimiters on BOTH sides of the hyphen -- same
+    # mechanism as the single-delimiter case, just walking past more than
+    # one dropped match to find the continuation.
+    items = tokenize("[the r=atio of third]-[2graders to fourth-graders2].")
+    assert [w.text for w in words_only(items)] == [
+        "the", "ratio", "of", "third-graders", "to", "fourth-graders",
+    ]
+
+
 def test_hyphen_leading_word_after_pause():
     # "eighty .. -three": mirror of the trailing "y-" truncation form.
     items = tokenize("eighty .. -three")
@@ -448,6 +458,58 @@ def test_real_corpus_isolated_hyphen_between_truncation_and_iu_truncation():
     ]
 
 
+def test_triple_hyphen_is_one_iu_truncation_boundary():
+    items = tokenize("I want---")
+    assert [w.text for w in words_only(items)] == ["I", "want"]
+    boundaries = [it for it in items if isinstance(it, Boundary)]
+    assert len(boundaries) == 1
+    assert boundaries[0].kind == "iu_truncation"
+    assert boundaries[0].raw == "---"
+
+
+def test_lost_letter_before_hyphen_leaves_isolated_hyphen():
+    # "0-": strip the artifact, the remaining "-" has nothing real
+    # attached on either side -- standalone, not raised.
+    items = tokenize("0- with the thing.")
+    words = words_only(items)
+    assert [w.text for w in words] == ["with", "the", "thing"]
+    assert [it.kind for it in items if isinstance(it, Boundary)][0] == "isolated_hyphen"
+
+
+def test_lost_letter_float_artifact_before_hyphen_leaves_isolated_hyphen():
+    items = tokenize("0.000000e+00- is an example,")
+    words = words_only(items)
+    assert [w.text for w in words] == ["is", "an", "example"]
+
+
+def test_vocal_noise_with_embedded_bracket_dropped_whole():
+    items = tokenize(".. (THR[OAT)] word")
+    assert [w.text for w in words_only(items)] == ["word"]
+
+
+def test_vocal_noise_with_embedded_underscore_bracket_dropped_whole():
+    items = tokenize("(AMENS_[CHEERS]_APPLAUSE)= word")
+    assert [w.text for w in words_only(items)] == ["word"]
+
+
+def test_vocal_noise_non_breath_with_lengthening_dropped_whole():
+    items = tokenize("(SH=) word")
+    assert [w.text for w in words_only(items)] == ["word"]
+
+
+def test_at_sign_breath_still_raises():
+    # Deliberately not fixed by the S2e widening -- see the rule-table
+    # comment: swallowing this would silently drop the "Hx" breath cue
+    # rather than surfacing it as its own decision.
+    with pytest.raises(TokenizeError):
+        tokenize("(@Hx) word")
+
+
+def test_angle_open_with_space_before_tag_name():
+    items = tokenize("we won't have < HI any nights HI> together.")
+    assert [w.text for w in words_only(items)] == ["we", "won't", "have", "any", "nights", "together"]
+
+
 def test_isolated_hyphen_removed_both_conditions():
     items = tokenize("okay - well")
     words = words_only(items)
@@ -456,11 +518,33 @@ def test_isolated_hyphen_removed_both_conditions():
     assert render(items, Condition.B) == "okay well"
 
 
-def test_underscore_trunc_requires_open_word():
-    # Not authorised: "_" glued to a mark, not a word (e.g. "%_you") --
-    # the hypothesis covers word_, not mark_word.
+def test_hyphen_after_glottal_mark_baseline():
+    # "%-you": the existing behaviour "_" is now made to match (S2 of the
+    # closing pass) -- the hyphen becomes its own standalone cue, "you"
+    # starts fresh rather than fusing to it.
+    items = tokenize("%-you know,")
+    assert [w.text for w in words_only(items)] == ["you", "know"]
+    assert [it.kind for it in items if isinstance(it, Cue)][:2] == ["glottal", "displaced_truncation"]
+
+
+def test_underscore_after_mark_matches_hyphen_form():
+    items = tokenize("%_you know,")
+    assert [w.text for w in words_only(items)] == ["you", "know"]
+    assert [it.kind for it in items if isinstance(it, Cue)][:2] == ["glottal", "underscore_truncation"]
+
+
+def test_underscore_after_dropped_construct_also_matches():
+    # Not just glottal/lengthening -- any already-matched mark before an
+    # unattached "_" (e.g. a dropped vocal-noise annotation).
+    items = tokenize("(TSK)_Well now,")
+    assert [w.text for w in words_only(items)] == ["Well", "now"]
+
+
+def test_underscore_trunc_still_raises_with_nothing_before_at_all():
+    # Not glued to anything (start of matches, i == 0) and no word open --
+    # genuinely nothing for the "_" to attach to or follow.
     with pytest.raises(TokenizeError):
-        tokenize("coming%_you know")
+        tokenize("_ well")
 
 
 def test_plus_dropped_inside_tag_span():
@@ -548,10 +632,17 @@ def test_bare_zero_mid_word():
     assert [w.text for w in words_only(items)] == ["rh"]
 
 
-def test_zero_before_hyphen_still_raises():
-    # Not a lowercase letter next -- outside the authorised shape.
-    with pytest.raises(TokenizeError):
-        tokenize("0- le- --")
+def test_zero_before_hyphen_no_longer_raises():
+    # "0-": lost_initial_letter's lookahead now accepts a following "-"
+    # too (S2d) -- the artifact strips, the lone hyphen left behind is
+    # isolated (nothing real on either side), "le-" is an ordinary
+    # truncated word, "--" is IU truncation.
+    items = tokenize("0- le- --")
+    assert [w.text for w in words_only(items)] == ["le-"]
+    assert [it.kind for it in items if isinstance(it, Boundary)] == [
+        "isolated_hyphen",
+        "iu_truncation",
+    ]
 
 
 # --- authorised compounds of documented marks (stage 4 follow-up S4) -----

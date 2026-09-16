@@ -791,6 +791,11 @@ was not re-measured this session since no fragment-affecting rule
 changed after §8.3's reconciliation — flagged here rather than restated
 without rechecking).
 
+**Resolved, next session: the 173 figure came from a local, never-
+committed draft — not recoverable, not pursued further.** Consistent
+with the above: it was never in this repository's history because it
+was never in this repository at all.
+
 ### 9.7 CLAUDE.md: terminal pitch and absent Du Bois marks
 
 Terminal pitch removed from tier 2 entirely, not narrowed to backslash —
@@ -802,3 +807,129 @@ backtick, booster semicolon, terminal-pitch backslash, latching `(0)`,
 and the timed-pause form `...(N)` — each still a live rule (raises
 rather than silently accepting one if it ever appears), absent from the
 data, not removed from the tiers.
+
+---
+
+## 10. A committed-transcript-text leak, audited and fixed; raises to 5
+
+### 10.1 The leak, and the audit
+
+`reports/phase2_marker_no_tier_examples.csv`, committed and pushed in
+`ae9f48e` (public repo), had a populated `text` column — 47 rows of raw
+IU content. `sbcsae_marker_inventory.py` wrote the full-text version
+straight to the committed path; the last rerun (regenerating the marker
+inventory for that session's CLAUDE.md work) overwrote what had
+previously been a pointer-only file. The exact same defect as the
+NUL-bytes CSV, fixed in the reader two sessions ago — not fixed here,
+because this script was never touched by that fix.
+
+**Audit of every script writing under `reports/` or `results/`**
+(`sbcsae_reader.py`, `sbcsae_tokenizer_validate.py`,
+`sbcsae_marker_inventory.py`, `temp_experiment.py`, `run_eval.py`,
+`run_eval_fewshot.py` — every `csv.DictWriter`/`csv.writer` call site in
+the codebase, not a sample): only `sbcsae_marker_inventory.py` had the
+defect. `sbcsae_reader.py` already carries the private/public split
+(fixed previously). The other four write only numeric/metric/id columns
+(`doc_id`, `precision`, `f1`, `window_diff`, `reason` as a diagnostic
+string, never verbatim corpus or model-output text) — checked field by
+field, not assumed clean because they looked similar.
+
+**Fixed**: `sbcsae_marker_inventory.py` now writes `pattern`/`file`/`line`
+only to the committed CSV and the full row (with `text`) to
+`reports/private/phase2_marker_no_tier_examples_full.csv`, same pattern
+as the NUL-bytes fix.
+
+**Guard added**: `tests/test_no_transcript_leaks.py` scans every CSV
+actually on disk under `reports/` and `results/` (not `reports/private/`)
+for a column named `text`/`context`/`content`/`raw`/`iu_text`
+(case-insensitive) and asserts it's empty, with one documented exception
+— `phase2_excluded_lines.csv`'s 14 original rows (`$`/backslash/ambiguous),
+which have always carried short content by design. Would have failed on
+the leaked file before the fix; passes now.
+
+**Remediation**: `ae9f48e` was the tip and had not been built on, so the
+fix was folded into it directly (`git commit --amend`) and force-pushed
+(`git push --force-with-lease`) rather than added as a new commit on top
+— the leak never needs to appear in the public history at all, not just
+get corrected in a later commit. New commit: `8d4d09c`.
+
+### 10.2 The 38 remaining raises: mapped to existing rules, to 5
+
+Each with a test and a whole-corpus count, per the brief:
+
+**a) A mark before `_` (`%_you`, 20 IUs).** First checked what `%-you`
+already does: `Cue(glottal)`, `Cue(displaced_truncation)`, then `you`
+starts fresh as its own word — the hyphen never fuses into the
+following word when nothing is open to attach it to. `_` now matches
+this exactly: `underscore_trunc`'s dispatch gained a second branch (glued
+to something, no word open → standalone `Cue(underscore_truncation)`,
+not a raise), and — checked against the actual data, not assumed from
+the one `%_you` example — the "mark" before it is not always glottal;
+`(TSK)`, `(MURMUR)`, `(Hx)`, `((MATCH_STRIKE))` all occur too, so the new
+branch doesn't restrict by what kind of mark precedes, only that
+something already-matched does. **0 remaining.**
+
+**b) A hyphen between two brackets** (`third]-[2graders`,
+`Thirty2]-[3five`). The existing "delimiter incidental to the word's own
+hyphen" mechanism (§9.3a) only looked one match ahead; a bracket on
+*both* sides meant the match right after the hyphen was another dropped
+delimiter, not the frag itself, so `glued_after` came back false and the
+word ended prematurely (`"third-"`, `"graders"` as two words, not
+raising but wrong). New helper, `_glued_frag_follows`, walks past any
+number of consecutive glued `drop`-kind matches to find the frag on the
+other side, not just one. **0 remaining** (was silently producing wrong
+word boundaries, not raising — found while implementing this item, not
+part of the original 38).
+
+**c) `---`** (`SBC010`, "I want---"). `iu_truncation`'s pattern widened
+from `--` to `-{2,}` — one `Boundary` with the full run as `raw`, logged
+distinctly from a plain `--`, not silently identical to it. **0
+remaining.**
+
+**d) `0-` / `0.000000e+00-`.** `lost_initial_letter`'s lookahead widened
+from `[a-z]` to `[a-z-]`. The bare `-` left behind after stripping falls
+to `_handle_displaced_trunc`'s existing "no word open" logic, extended
+to also treat a `drop`-kind predecessor that produced no pending word
+(not just "nothing there at all") as unattached: `isolated` if nothing
+follows, `start_new` if a word does. **0 remaining.**
+
+**e) Vocal-noise names with an embedded bracket or non-breath `=`**
+(`(THR[OAT)]`, `(AMENS_[CHEERS]_APPLAUSE)=`, `(SH=)`). `vocal_noise_caps`'s
+body character class gained `[`, `]`, `=` — not the first-character
+class, deliberately: widening that too would let `(@Hx)` be silently
+swallowed as generic dropped noise instead of surfacing its own
+question (does the `Hx` breath cue underneath the `@` deserve to
+survive into condition B?) — left raising on purpose. **3 of 8 in this
+category remain** (see below), not the 0 the task's own framing implied
+for every case in it.
+
+**f) `<` followed by a space and a tag name** (`< HI any nights HI>`).
+New rule, `angle_open_spaced` (`<\s+[A-Za-z0-9@%]+`), the mirror-image of
+the already-fixed "close missing its name before `>`" malformation
+(§9.3e). **0 remaining.**
+
+**Target zero raises — not reached. 5 of 68,815 remain, listed raw here
+per the task's own instruction to stop rather than guess further:**
+
+```
+SBC002  (TSK (H)3]
+SBC015  [2(H]=2]
+SBC019  ... (SNIFF .. (Hx) (Hx)=)
+SBC023  [(SNIFF)] [2(SNIFF2]
+SBC056  (@Hx)
+```
+
+Four of these share one shape not covered by (e)'s literal "embedded
+bracket or non-breath `=`": the closing `)` is **entirely missing**
+(replaced by nothing, by a nested unclosed `(H)`/`(Hx)`, or by a
+bracket-then-digit run with no `)` anywhere in the IU), not merely
+accompanied by an extra bracket/`=` alongside an otherwise-present `)`.
+Widening `vocal_noise_caps` to accept `]` as an alternative closing
+delimiter to `)` would fix these mechanically but conflates two
+different transcription conventions (parens and brackets) on no
+evidence beyond convenience, so it wasn't done. `(@Hx)` is the
+deliberately-scoped-out case from (e) above. All five: reported, not
+guessed at.
+
+106 tokenizer tests pass (up from 97); full suite 634 passed, 11
+skipped.

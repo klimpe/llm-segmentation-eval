@@ -271,20 +271,23 @@ Write the tokeniser with the A/B switch from the start. Validate the rule on
 its own — given one IU's raw text, show what comes out — before it is used
 anywhere.
 
-**Raises: 311 of 69,029 IUs (0.45%), down from 340 — still not zero, still
-not decided.** Every raise is logged (file, line, character, reason) to
+**Raises: 5 of 68,815 IUs (0.01%), down from 340 — close to zero, not
+zero.** Every raise is logged (file, line, character, reason) to
 `reports/private/phase2_tokenizer_raises_full.csv`; counts and reasons only
 (no transcript text) in the committed `reports/phase2_tokenizer_raises.csv`.
-Dominant remaining categories, each its own open decision, none authorised:
-`_` (210 IUs, mostly SBC012/SBC013) — a self-interruption/abandoned-
-utterance marker (trailing `word_`, standalone `__`), a different
-phenomenon from anything above, found but not decided; `-` (66) — orphaned
-hyphens (a compound split by a bracket, or an isolated dash); `(` (26) — a
-lowercase vocal-noise name (`(throat)`) or a mark glued inside plain
-parens with no brackets (`(H=)`), neither covered by the case-folding
-above; `>`/`<` (6) — single-angle tags hitting the same zero-content
-open/close adjacency mechanism fixed for `<<...>>` above, not yet fixed for
-single angle.
+SBC012/SBC013's `_`-as-truncation-mark convention is decided and
+implemented (`__` as `--`, `word_` as `word-`), as is a mark directly
+before an unattached `_`/`-` (`%_you`/`%-you`, both become a standalone
+cue rather than raising or fusing), a hyphen sandwiched between brackets
+on both sides, `---`, `0-`/`0.000000e+00-`, most vocal-noise names with
+an embedded bracket or a non-breath `=`, and a `<` followed by a space
+before the tag name — see `reports/phase2_tokeniser.md` §10 for each.
+**What's left, all `(`, all reported not guessed at**: a vocal-noise span
+missing its closing `)` entirely (replaced by nothing, a nested unclosed
+`(H)`/`(Hx)`, or a bracket-then-digit run) in 3 of 5 remaining IUs; `(@Hx)`
+deliberately left alone, since swallowing it would silently drop the
+`Hx` breath cue rather than surface the question of whether to preserve
+it.
 
 ### No genre breakdown
 
