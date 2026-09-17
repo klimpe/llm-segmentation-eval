@@ -445,6 +445,40 @@ def test_hyphen_leading_word_after_pause():
     assert [w.text for w in words_only(items)] == ["eighty", "-three"]
 
 
+def test_leading_hyphen_flushes_pending_word_first():
+    # Bug fixed this session (reports/phase2_tokeniser.md S12/S14):
+    # "uh -gerald" used to silently fuse into one wrong word, "uh-gerald",
+    # because "uh" was still pending (nothing between it and the space-
+    # then-hyphen to trigger a flush) when case 4's "start_new" appended
+    # the hyphen onto it instead of starting fresh. All 3 real-corpus
+    # instances found by the independent cross-check.
+    items = tokenize("Fitz- uh -gerald,")
+    assert [w.text for w in words_only(items)] == ["Fitz-", "uh", "-gerald"]
+
+
+def test_leading_hyphen_flushes_pending_truncated_word_first():
+    # "alw-" is itself already a complete, correctly-truncated word (the
+    # word pattern's own trailing hyphen) -- must not be extended by the
+    # unrelated leading hyphen of the next word.
+    items = tokenize("Might alw- -so,")
+    assert [w.text for w in words_only(items)] == ["Might", "alw-", "-so"]
+
+
+def test_leading_hyphen_flushes_pending_word_first_multi_word_prefix():
+    items = tokenize("And we he rela- -turned,")
+    assert [w.text for w in words_only(items)] == ["And", "we", "he", "rela-", "-turned"]
+
+
+def test_isolated_hyphen_flushes_pending_word_first():
+    # Same fix, the "isolated" (glued on neither side) branch: no real
+    # corpus instance, but the same stale-pending-word bug would apply --
+    # "hello" must not be silently absorbed by an unrelated standalone
+    # hyphen that happens to follow it with no intervening flush.
+    items = tokenize("hello - there")
+    assert [w.text for w in words_only(items)] == ["hello", "there"]
+    assert [it.kind for it in items if isinstance(it, Boundary)] == ["isolated_hyphen"]
+
+
 def test_real_corpus_isolated_hyphen_between_truncation_and_iu_truncation():
     # ".. s- - --": a truncated word ("s-", the word pattern's own
     # trailing-hyphen support, not displaced_trunc at all), an isolated

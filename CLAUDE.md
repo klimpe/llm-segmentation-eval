@@ -286,14 +286,26 @@ the next corpus-affecting change, not deleted).
 An independent word-count cross-check (`reports/phase2_tokeniser.md` §12;
 strips everything but letters/apostrophes/hyphens/whitespace per IU and
 counts runs, sharing no code with the tokeniser) found one real,
-previously-silent mis-split, distinct from the bracket-hyphen bug fixed
-earlier this stage: `_handle_displaced_trunc`'s "leading hyphen starts a
-new word" case (`eighty .. -three`) does not flush an already-pending word
-first, so a plain word directly followed by whitespace and a hyphen-led
-word (`uh -gerald`) gets silently fused into one wrong word
-(`uh-gerald`) instead of two. **3 of 68,815 IUs affected, confirmed,
-not fixed** (reports/phase2_tokeniser.md §12) — stage 4 is not final
-until this is decided; see "Where phase 2 stands" below.
+previously-silent mis-split: `_handle_displaced_trunc`'s "leading hyphen
+starts a new word" case (`eighty .. -three`) did not flush an
+already-pending word first, so a plain word directly followed by
+whitespace and a hyphen-led word (`uh -gerald`) silently fused into one
+wrong word (`uh-gerald`) instead of two. **Fixed** (`reports/
+phase2_tokeniser.md` §14.1) — both branches now flush the pending word
+themselves before deciding what the hyphen does.
+
+**Fixing that did not mean the tokeniser was correct everywhere either.**
+Word-level invariants (`reports/phase2_tokeniser.md` §14.2, replacing the
+count-level cross-check, which attributed a real error to *any* delimiter
+present anywhere in the same IU rather than the one that actually caused
+it) found a second, different bug: `_sandwiched()` only looks one match
+ahead, so a *run* of 2+ glued cue marks between two word fragments
+(`b==itch.`) breaks fusion the same way the already-fixed bracket-hyphen
+case did (`_glued_frag_follows`) — just never patched here. **9 of
+68,815 IUs affected (7 visible to the lowercase-only "lost words" check,
+2 more found by direct structural confirmation), confirmed, not fixed**
+(`reports/phase2_tokeniser.md` §14.3) — stage 4 is still not final; see
+"Where phase 2 stands" below.
 
 ### No genre breakdown
 
@@ -304,13 +316,19 @@ enable. Break results down by document and by document length instead.
 
 ### Where phase 2 stands
 
-Stages 1–3 complete: reading, line structure, `&` merge. Stage 4 (tokeniser)
-is functionally complete — 0 raises over 68,815 IUs (excl. SBC037), 5,179
-zero-word IUs dropped, 63,636 reference segments — but **not marked final**:
-the independent word-count cross-check (`reports/phase2_tokeniser.md` §12)
-found one open, unattributed bug (`_handle_displaced_trunc`'s leading-hyphen
-case silently fusing across whitespace, 3 IUs) that is reported, not fixed.
-Next: decide that case, then the LLM run with `n_samples=5` from the start.
+Stages 1–3 complete: reading, line structure, `&` merge. Stage 4
+(tokeniser): 0 raises over 68,815 IUs (excl. SBC037), 5,179 zero-word IUs
+dropped, 63,636 reference segments; the pending-word bug
+(`_handle_displaced_trunc`, `uh -gerald` → `uh-gerald`) is fixed. **Not
+marked final**: word-level invariants (`reports/phase2_tokeniser.md`
+§14.2-14.3) found a second, different, still-open bug — `_sandwiched()`'s
+one-match lookahead breaks on a run of 2+ glued cue marks between two
+words (`b==itch.` → `b`, `itch`), 9 IUs, same root cause and fix shape as
+the already-fixed bracket-hyphen case, not yet applied here. Regression
+tests for all three invariants (`tests/test_tokenizer_invariants.py`) now
+run every time, so this and future checks of the same kind can't drift
+unnoticed. Next: fix `_sandwiched()`, re-run every stage-4 check again,
+then the LLM run with `n_samples=5` from the start.
 
 ## Sampling
 

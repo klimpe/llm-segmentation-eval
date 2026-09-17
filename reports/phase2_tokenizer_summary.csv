@@ -5,7 +5,7 @@ raise_rate,0.0
 n_tokenised,68815
 n_zero_word_ius,5179
 files_with_zero_word_ius,59
-mean_words_per_iu,3.5903
+mean_words_per_iu,3.5904
 max_words_per_iu,21
 n_ab_mismatches,0
 n_overlap_leftover_digit_firings,12

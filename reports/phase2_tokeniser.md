@@ -1137,3 +1137,188 @@ proximity to zero. Next open item: decide what to do about it (the fix is
 straightforward — flush a pending word before case 4's `start_new`
 appends the hyphen — but per this step's brief, deciding and implementing
 that fix was explicitly out of scope here).
+
+---
+
+## 14. The pending-word bug, fixed; word-level invariants find a second,
+## different bug
+
+### 14.1 `_handle_displaced_trunc` fixed
+
+§12/§13's `uh -gerald` → `uh-gerald` bug: `_handle_displaced_trunc`'s
+"leading hyphen starts a new word" branches (cases 4 and 5) assumed "not
+glued to anything before" meant nothing could be pending — true when the
+hyphen follows a cue/boundary (always flushes first), false when it
+follows an ordinary word ended only by whitespace, with nothing between
+to trigger a flush. Fixed by having both branches call the caller's own
+`flush_word()` themselves (now passed in as a parameter) before deciding
+what the hyphen does, so a genuinely-complete pending word (`uh`, or an
+already-correctly-truncated `alw-`) is flushed as its own `Word` instead
+of silently absorbing the hyphen. Tested on all 3 real-corpus IUs found in
+§12, plus a synthetic case for the "isolated" branch (no real-corpus
+instance, same root cause, same fix):
+
+```
+Fitz- uh -gerald,        -> ['Fitz-', 'uh', '-gerald']       (was 'uh-gerald')
+Might alw- -so,          -> ['Might', 'alw-', '-so']          (was 'alw--so')
+And we he rela- -turned, -> ['And', 'we', 'he', 'rela-', '-turned']  (was 'rela--turned')
+```
+
+117 tokenizer tests pass (up from 113). Whole-corpus rerun: **0 of 68,815
+raises**, unchanged — this was a mis-split, not a raise, and stays that
+way after the fix.
+
+### 14.2 Word-level invariants, replacing count-level attribution
+
+§12's cross-check attributes any per-IU word-count mismatch to *any*
+delimiter present anywhere in the IU — so a real boundary error in an IU
+that also happens to contain, say, an overlap bracket passes as
+"explained" by the bracket, whether or not the bracket has anything to do
+with the actual error. Three word-level checks replace it this session
+(`sbcsae_tokenizer_invariants.py`, new — shares no code with
+`sbcsae_tokenizer.py`, same independence standard as §12's cross-check):
+
+- **(a) No fusion across whitespace.** Every emitted word's letters must
+  be a contiguous substring of some *single* whitespace-delimited raw
+  chunk's own letters (non-letters deleted from that chunk first). A
+  word whose letters straddle two chunks can only mean a fusion-across-
+  whitespace bug — the exact class §14.1 just fixed.
+- **(b) No lost words.** Every raw chunk's lowercase letters, outside a
+  `((...))` research comment or a `/.../` phonetic gloss, must be a
+  contiguous substring of some single emitted word's letters.
+- **(c) Capitalised material.** Every distinct all-caps chunk (a maximal
+  run of uppercase ASCII letters not glued to a lowercase letter on
+  either side — so a mixed-case word's own capital, like the `V` in
+  `InterVarsity`, is never mistaken for a standalone marker), tallied
+  corpus-wide as kept (its letters survive into some emitted word) vs.
+  removed.
+
+**(a): 0 violations**, confirming §14.1's fix is complete — no other
+instance of a word's letters crossing a whitespace boundary exists
+anywhere in the corpus.
+
+**(b): 1,266 violations**, all attributed to a cause, none left as
+"other" once the categoriser accounted for every documented rule this
+project already has, plus two shapes that are false positives of the
+check's own single-chunk/single-word design rather than defects:
+
+| category | count | cause |
+|---|---|---|
+| `parenthetical_marker` | 1,108 | breath/vocal-noise/research-comment letters, correctly dropped |
+| `overlap_bracket` | 99 | `[...]`/`[N...N]` content/delimiters |
+| `internal_capital_in_kept_word` | 26 | a correctly-kept compound word with an internal capital (`McNuggets`, `Wal-Mart`, `InterVarsity`) — the check's lowercase-only "required" string fragments at the capital even though the whole word is right there; confirmed by checking the *full* chunk (case preserved) is a contiguous substring of the emitted word |
+| `underscore_truncation_or_gloss` | 8 | `_` as truncation/gloss/word-internal joiner |
+| **`doubled_cue_fusion`** | **7** | **real bug, see §14.3** |
+| `angle_tag` | 5 | `<TAG...TAG>`/`<<TAG...TAG>>` content/delimiters |
+| `lost_initial_letter` | 4 | the `0`/`0.000000e+00` artifact — documented: stripped, never reconstructed |
+| `boundary_or_multiword_split` | 4 | the chunk was correctly split into 2+ separate words at a `Boundary` (`that,a` → `that`, `a`) or a displaced-truncation flush (`Ya=-ha` → `Ya-`, `ha`); confirmed by checking `required` is a contiguous substring of the *concatenation* of all emitted words for the IU, not just one |
+| `disguise_prefix` | 4 | `~`/`#`/`*` prefix, correctly dropped |
+| `at_sign_fusion` | 1 | `@` mid-word, correctly dropped |
+
+**(c): 300 distinct all-caps chunks.** Spot check, the point of this
+check per the brief — real short words must never be silently removed:
+
+| value | kept | removed |
+|---|---|---|
+| `I` | 9,569 | **0** |
+| `TV` | 23 | **0** |
+| `OK` | — | does not occur in the corpus |
+
+Marker/tag names sit at the opposite end as expected (`SNIFF` 0/367,
+`THROAT` 0/300, `VOX` 2/1,145 — the 2 kept are a distinct, already-known,
+unexplained `>ENV`-speaker anomaly from `reports/phase2_tokeniser.md`
+§8.2a, not touched here). `H` (10,081 total) is dominated by the breath
+cue and correctly mostly-removed, but its kept=312 is not a precise
+per-occurrence count — the tally's "kept" test is substring containment
+of *some* emitted word for the IU, so a real H-initial proper noun
+co-occurring with an unrelated `(H)` breath cue in the same IU can
+register as a false "kept" for that IU. Noted as a limitation of the
+tally's resolution, not investigated further, since it doesn't affect the
+(c) spot check's actual purpose (I/TV/OK above) or its direction of
+error (it can only ever over-count "kept", so it cannot hide a real
+silent removal).
+
+### 14.3 A second, different bug: doubled cue marks don't fuse
+
+The 7 `doubled_cue_fusion` violations share one shape: `b==itch.` →
+`['b', 'itch']` instead of `['bitch']`. Root cause, confirmed against
+`sbcsae_tokenizer.py`'s own matching (not guessed): `_sandwiched()`
+decides whether a cue mark is embedded mid-word by checking exactly one
+match ahead — is the *next* match a `frag`/`displaced_trunc`? For a
+*single* cue this is right (`s=o` → the match after `=` is `o`, a frag,
+fuses). For a **run of 2 or more glued cue marks** (`b==itch`: two
+lengthening marks), the match right after the *first* `=` is the
+*second* `=` — kind `cue`, not `frag` — so `_sandwiched` says no, the
+word flushes prematurely, and the whole run of cues plus whatever
+follows starts over as unrelated standalone tokens. The exact same
+class of bug as the already-fixed bracket-hyphen case
+(`reports/phase2_tokeniser.md` §10.2b, `_glued_frag_follows`) and this
+session's §14.1 fix — a one-match lookahead that breaks the moment more
+than one delimiter is glued in a row — just never applied to
+`_sandwiched()`.
+
+**Scope, confirmed corpus-wide, not just the 7 (b) surfaced**: (b) only
+examines *lowercase* letters, so a run split entirely on the uppercase
+side (`R==un` → `['R', 'un']` — "un" alone is a real, findable word, so
+(b) never flags it) is invisible to it. A direct structural scan (every
+IU where a run of 2+ glued `cue`-kind matches sits between two `frag`
+matches, walking past any number of intervening glued `drop`-kind
+delimiters the same way `_glued_frag_follows` already does for the
+hyphen case) finds **9 IUs total**, all confirmed by running the actual
+tokeniser on each:
+
+```
+SBC006:288    b==itch.                    -> ['b', 'itch']              (bitch)
+SBC006:1739   cu==z,                      -> ['cu', 'z']                (cuz)
+SBC013:197    gro==ss4].                  -> ['gro', 'ss']              (gross)
+SBC031:779    b==odies                    -> ['b', 'odies']             (bodies)
+SBC032:406    f==ifty,                    -> ['f', 'ifty']              (fifty)
+SBC032:470    f==orty-nine,               -> ['f', 'orty-nine']         (forty-nine)
+SBC048:468    No3][4==t at4] a=ll         -> ['No', 't', 'at', 'all']   (not at all)
+SBC054:298    R==un boy                   -> ['R', 'un', 'boy']         (run)
+SBC054:300    R==un                       -> ['R', 'un']                (run)
+```
+
+**Not fixed in this step, per the brief.** Reported here; pinned as a
+known, open regression baseline (7, the lowercase-visible subset) in
+`tests/test_tokenizer_invariants.py`.
+
+### 14.4 Regression tests added, run every time
+
+`tests/test_tokenizer_invariants.py` (new) promotes (a)/(b)/(c) from a
+one-off analysis script into permanent tests, per the brief:
+
+- `test_a_no_fusion_across_whitespace`: asserts exactly 0, always — no
+  legitimate reason this can ever be nonzero.
+- `test_b_no_lost_words_all_attributable`: asserts every (b) violation's
+  category is on a known-attributable allowlist and `other` is empty —
+  a genuinely new, unattributed shape fails this test rather than
+  silently passing.
+- `test_b_doubled_cue_fusion_is_pinned_open_bug`: asserts the count stays
+  at the current baseline (7) — not zero, since the bug is real and
+  open, but pinned so the count silently growing (or a partial,
+  accidental fix skewing it) is caught rather than drifting unnoticed.
+- `test_c_real_short_words_never_silently_removed`: asserts `I` and `TV`
+  are never in the "removed" column.
+
+`sbcsae_tokenizer_crosscheck.py` (§12) is unchanged and kept as-is, per
+the brief — a different, coarser diagnostic, still useful for the
+distribution-level view.
+
+117 tokenizer tests pass (up from 113); full suite **650 passed, 11
+skipped** (up from 642), runtime ~8s (up from ~1.5s — the new
+corpus-wide invariant tests are the entire difference, computed once per
+module via a fixture rather than once per test).
+
+### 14.5 Status
+
+**Stage 4 is still not marked final.** §14.1 closed out the bug §12/§13
+found, but §14.2's different, more precise check immediately found
+another one of the same class (§14.3, `doubled_cue_fusion`, 9 IUs) that
+no earlier check — raises, the count-level cross-check, or casual
+reading — had surfaced. Per the brief: 2a-2c did not find *nothing*
+beyond documented rules and named exceptions, so stage 4 is not final.
+Next open item: fix `_sandwiched()`'s one-match lookahead the same way
+`_glued_frag_follows` already fixes the analogous hyphen case (walk past
+a run of glued cue marks, not just one), then re-run every check in
+§11-§14 again before reconsidering "final."

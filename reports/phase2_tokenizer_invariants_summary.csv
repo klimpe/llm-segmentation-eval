@@ -1,0 +1,12 @@
+check,category,count
+a_no_fusion_across_whitespace,violation,0
+b_no_lost_words,parenthetical_marker (breath/vocal-noise name),1108
+b_no_lost_words,overlap_bracket,99
+b_no_lost_words,"internal_capital_in_kept_word (McNuggets/Wal-Mart-shaped, not lost)",26
+b_no_lost_words,underscore_truncation_or_gloss,8
+b_no_lost_words,"doubled_cue_fusion (silent mis-split, real bug, not attributable)",7
+b_no_lost_words,angle_tag,5
+b_no_lost_words,"lost_initial_letter (documented: stripped, never reconstructed)",4
+b_no_lost_words,"boundary_or_multiword_split (Boundary/displaced-truncation flush, not lost)",4
+b_no_lost_words,disguise_prefix,4
+b_no_lost_words,at_sign_fusion,1

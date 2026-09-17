@@ -51,6 +51,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from enum import Enum
+from typing import Callable
 
 
 class Condition(Enum):
@@ -628,7 +629,7 @@ def tokenize(text: str) -> list[TokenItem]:
 
         if kind == "displaced_trunc":
             action = _handle_displaced_trunc(
-                matches, i, text, glued, pending_active, pending_norm_pieces, pending_raw_pieces, items
+                matches, i, text, glued, pending_active, pending_norm_pieces, pending_raw_pieces, items, flush_word
             )
             if action == "flush":
                 # The hyphen completed the pending word (attached case):
@@ -683,6 +684,7 @@ def _handle_displaced_trunc(
     pending_norm_pieces: list[str],
     pending_raw_pieces: list[str],
     items: list[TokenItem],
+    flush_word: Callable[[], None],
 ) -> str:
     """A single hyphen not part of "--", in one of four authorised shapes.
     Returns an action for the caller: "flush" (word is complete, flush
@@ -690,6 +692,19 @@ def _handle_displaced_trunc(
     flush and must ensure pending_active is True for the next frag match
     to attach to), or "cue_only" (nothing else to do). Raises for anything
     outside these four shapes -- this is not a general orphan-hyphen rule.
+
+    Bug fixed this session (reports/phase2_tokeniser.md S12/S14): cases 4
+    and 5 below used to assume "not glued_before" meant no word could
+    possibly be pending -- true when the hyphen follows a cue/boundary
+    (which always flushes first), but false when it follows an ordinary
+    word ended only by whitespace, with nothing in between to trigger a
+    flush ("uh -gerald": "uh" is still open when the "-" match arrives).
+    The old code appended the hyphen onto that stale pending word instead
+    of starting a new one -- "uh-gerald" as one wrong word, silently, no
+    raise. Both branches below now flush any pending word themselves
+    (via the caller's own flush_word, so the already-open word becomes
+    its own correct, complete Word) before deciding what the hyphen
+    itself does.
 
     1. **Displaced truncation** ("b=-", "%-"): a hyphen displaced from its
        word by an intervening lengthening/glottal mark. Word-final --
@@ -754,6 +769,13 @@ def _handle_displaced_trunc(
         _raise_unrecognised(text, "-", matches[i].start())
 
     if not glued_before and glued_after:
+        if pending_active:
+            # The word before this hyphen ended at whitespace, not glued
+            # to it -- it is already complete (e.g. "alw-", itself
+            # correctly truncated) and must not be extended. Flush it as
+            # its own Word first, so the hyphen below genuinely starts a
+            # new one instead of silently fusing onto the old.
+            flush_word()
         pending_norm_pieces.append("-")
         pending_raw_pieces.append("-")
         return "start_new"
@@ -762,7 +784,10 @@ def _handle_displaced_trunc(
         # 5. A standalone "-" with nothing glued on either side (confirmed
         # this session): not a truncation, not a compound -- a bare, free-
         # floating dash. Removed in both conditions, same as a Boundary,
-        # but logged as its own kind rather than silently absent.
+        # but logged as its own kind rather than silently absent. Same
+        # stale-pending-word fix as case 4 above: flush first if needed.
+        if pending_active:
+            flush_word()
         return "isolated"
 
     _raise_unrecognised(text, "-", matches[i].start())

@@ -43,6 +43,8 @@ ALLOWED_COLUMNS = {
         "file", "raw_line", "iu_index", "old_speaker", "new_speaker", "in_amp_chain", "cause",
     },
     "reports/phase2_tokenizer_crosscheck_summary.csv": {"diff", "category", "count"},
+    "reports/phase2_tokenizer_invariants_summary.csv": {"check", "category", "count"},
+    "reports/phase2_tokenizer_capitalised_tally.csv": {"value", "kept", "removed"},
     "reports/phase2_tokenizer_raises.csv": {"char", "codepoint", "count", "files", "reason"},
     "reports/phase2_tokenizer_summary.csv": {"metric", "value"},
     "reports/phase2_tokenizer_words_per_iu.csv": {"n_words", "n_ius"},
