@@ -1,0 +1,50 @@
+diff,category,count
+-10,parenthetical_marker (breath/vocal-noise/research-comment letters),1
+-9,underscore_truncation_or_gloss,1
+-8,parenthetical_marker (breath/vocal-noise/research-comment letters),1
+-8,underscore_truncation_or_gloss,1
+-7,"cue_fusion (=^`!;%\ mid-word, tokeniser fuses, naive method splits)",1
+-7,parenthetical_marker (breath/vocal-noise/research-comment letters),2
+-6,"cue_fusion (=^`!;%\ mid-word, tokeniser fuses, naive method splits)",2
+-6,"hyphen_only_run (-- / --- / isolated -, a Boundary, not a Word)",1
+-6,parenthetical_marker (breath/vocal-noise/research-comment letters),7
+-5,angle_tag,2
+-5,"cue_fusion (=^`!;%\ mid-word, tokeniser fuses, naive method splits)",21
+-5,"hyphen_only_run (-- / --- / isolated -, a Boundary, not a Word)",12
+-5,numbered_overlap_bracket,5
+-5,overlap_bracket,3
+-5,parenthetical_marker (breath/vocal-noise/research-comment letters),22
+-4,angle_tag,36
+-4,"cue_fusion (=^`!;%\ mid-word, tokeniser fuses, naive method splits)",66
+-4,"hyphen_only_run (-- / --- / isolated -, a Boundary, not a Word)",42
+-4,numbered_overlap_bracket,15
+-4,overlap_bracket,18
+-4,parenthetical_marker (breath/vocal-noise/research-comment letters),63
+-4,underscore_truncation_or_gloss,1
+-3,angle_tag,13
+-3,"cue_fusion (=^`!;%\ mid-word, tokeniser fuses, naive method splits)",251
+-3,"hyphen_only_run (-- / --- / isolated -, a Boundary, not a Word)",272
+-3,numbered_overlap_bracket,56
+-3,overlap_bracket,42
+-3,parenthetical_marker (breath/vocal-noise/research-comment letters),316
+-3,underscore_truncation_or_gloss,1
+-2,angle_tag,871
+-2,at_sign_fusion (tier-1 drop mark mid-word or standalone laughter),1
+-2,"cue_fusion (=^`!;%\ mid-word, tokeniser fuses, naive method splits)",960
+-2,"hyphen_only_run (-- / --- / isolated -, a Boundary, not a Word)",807
+-2,lost_initial_letter,1
+-2,numbered_overlap_bracket,427
+-2,overlap_bracket,426
+-2,parenthetical_marker (breath/vocal-noise/research-comment letters),1156
+-2,underscore_truncation_or_gloss,23
+-1,angle_tag,615
+-1,at_sign_fusion (tier-1 drop mark mid-word or standalone laughter),3
+-1,"cue_fusion (=^`!;%\ mid-word, tokeniser fuses, naive method splits)",2120
+-1,"hyphen_only_run (-- / --- / isolated -, a Boundary, not a Word)",3609
+-1,lost_initial_letter,8
+-1,numbered_overlap_bracket,1146
+-1,other,3
+-1,overlap_bracket,1268
+-1,parenthetical_marker (breath/vocal-noise/research-comment letters),9606
+-1,"plus_fusion (tier-1 drop mark mid-word, S8.1c)",2
+-1,underscore_truncation_or_gloss,60

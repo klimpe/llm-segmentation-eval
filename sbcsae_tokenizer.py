@@ -137,6 +137,16 @@ _RULES: list[tuple[str, str, str]] = [
     # without the enclosing "[=]" brackets -- decomposes the same way.
     # Case-folded on both letters, matching breath_in/out above.
     ("compound", "breath_paren_lengthening", r"\((?P<bpl_letter>[hH][xX]?)=\)"),
+    # SBC015 line 1805, "[2(H]=2]": one of the 5 named exceptions closing
+    # out the tokeniser raises. Same breath+lengthening compound as
+    # breath_paren_lengthening ("(H=)") above, but here a numbered overlap
+    # bracket has landed where the compound's own closing ")" should be --
+    # the ")" never appears anywhere in the IU. Anchored tightly to this
+    # exact occurrence (lookbehind/lookahead on the surrounding "[2"/"2]",
+    # not a general "]" -> ")" substitution rule, which would conflate the
+    # overlap-bracket and vocal-noise-paren conventions on no evidence
+    # beyond convenience -- see reports/phase2_tokeniser.md S10.2e).
+    ("compound", "sbc015_breath_bracket_lengthening_named_exception", r"(?<=\[2)\(H\]=(?=2\])"),
     # Case-insensitive throughout (confirmed this session: lowercase names
     # like "(throat)"/"(sigh)"/"(sniff)" are the same convention as the
     # capitalised form, and this single class also resolves a mixed-case
@@ -155,6 +165,38 @@ _RULES: list[tuple[str, str, str]] = [
     # decision about whether to preserve the "Hx" breath cue underneath
     # the "@" -- left raising on purpose (S2 report).
     ("drop", "vocal_noise_caps", r"\([A-Za-z][A-Za-z0-9_.,\[\]= ]*\)"),
+    # Four more of the 5 closing-out named exceptions (reports/
+    # phase2_tokeniser.md S10.2): each an orphaned "(NAME" vocal-noise
+    # annotation whose closing ")" is entirely missing from the raw text
+    # (replaced by nothing, a nested unclosed breath cue, or a bracket-
+    # then-digit run -- vocal_noise_caps above correctly fails to match
+    # any of these, since it requires a literal ")" that never appears).
+    # Each pattern is anchored to its own exact surrounding context, not a
+    # general "missing paren" rule -- widening vocal_noise_caps itself to
+    # tolerate a missing close would silently swallow the question of
+    # what's actually inside, corpus-wide, not just here.
+    #
+    # SBC002 line 466, "(TSK (H)3]": "(TSK" dropped whole; the nested
+    # "(H)" that follows is an ordinary, already-matched breath_in cue,
+    # and "3]" is an ordinary, already-matched overlap-num-close leftover
+    # -- only the orphaned "(TSK" itself needed a new rule.
+    ("drop", "sbc002_tsk_named_exception", r"\(TSK(?=\s\(H\)3\])"),
+    # SBC019 line 116, "... (SNIFF .. (Hx) (Hx)=)": "(SNIFF" is dropped
+    # the same way; its own close never appears -- the IU's final ")"
+    # (otherwise unmatched, since it belongs to no other span) is the
+    # orphaned close and needs its own anchored exception. Everything in
+    # between (the pause, both "(Hx)" breath cues, the lengthening "=")
+    # already tokenises correctly on its own.
+    ("drop", "sbc019_sniff_open_named_exception", r"\(SNIFF(?=\s\.\.\s\(Hx\)\s\(Hx\)=\))"),
+    ("drop", "sbc019_sniff_close_named_exception", r"(?<=SNIFF\s\.\.\s\(Hx\)\s\(Hx\)=)\)"),
+    # SBC023 line 1469, "[(SNIFF)] [2(SNIFF2]": the first "[(SNIFF)]" is
+    # already well-formed and tokenises correctly (a complete
+    # vocal_noise_caps match inside a plain overlap bracket). Only the
+    # second, "[2(SNIFF2]", is malformed -- the bracket-then-digit-run
+    # shape, "2]" landing where "SNIFF"'s own ")" should be. Anchored to
+    # the preceding "[2" so it cannot fire on the first, well-formed
+    # occurrence in the same IU.
+    ("drop", "sbc023_sniff_bracket_digit_named_exception", r"(?<=\[2)\(SNIFF(?=2\])"),
     # Empty parens, nothing inside (S1e, "@()", "...() (TSK)"): a
     # vocal-noise annotation the transcriber opened and closed with no
     # content -- dropped the same way a filled one would be.
@@ -225,6 +267,17 @@ _RULES: list[tuple[str, str, str]] = [
     # Same "no pairing" treatment as every other angle-tag delimiter here:
     # stripped on sight, not verified against any particular open tag.
     ("drop", "angle_close_bare_missing_name", r"(?<=\s)>"),
+    # SBC056 line 1169, "(@Hx)": the fifth and last of the 5 named
+    # exceptions closing out the tokeniser raises. Laughter "@" landed
+    # inside an otherwise-ordinary breath_out annotation, with no
+    # documented compound for "@" co-occurring with a breath cue (unlike
+    # "(%Hx)"'s glottal_breath above). Per the decision: the laughter is
+    # dropped (not rendered as a cue, unlike glottal_breath's own "%"),
+    # and "(Hx)" survives as an ordinary breath_out cue -- the same
+    # decomposition shape as breath_paren_lengthening, just with the "@"
+    # discarded rather than converted into a second cue. Anchored to the
+    # literal, single corpus occurrence, not a general "(@...)" rule.
+    ("compound", "sbc056_laughter_breath_named_exception", r"\(@Hx\)"),
     ("drop", "at_sign", r"@+"),
     # "+": event-timing marker inside <<...>> quality spans (S3c, corrected
     # this session by cross-IU-aware scanning: of 177 occurrences, 165 sit
@@ -556,6 +609,16 @@ def tokenize(text: str) -> list[TokenItem]:
                 breath_kind = "breath_out" if group.lower() == "hx" else "breath_in"
                 items.append(Cue(kind=breath_kind, raw=f"({group}["))
                 items.append(Cue(kind="lengthening", raw="=])"))
+            elif name == "sbc015_breath_bracket_lengthening_named_exception":
+                # "[2(H]=2]" -- the numbered overlap brackets tokenise on
+                # their own before/after this match; only the compound
+                # itself (breath_in + lengthening, "]" standing in for the
+                # missing ")") is produced here.
+                items.append(Cue(kind="breath_in", raw="(H]"))
+                items.append(Cue(kind="lengthening", raw="="))
+            elif name == "sbc056_laughter_breath_named_exception":
+                # "(@Hx)" -- laughter dropped, breath_out survives alone.
+                items.append(Cue(kind="breath_out", raw="(Hx)"))
             else:  # breath_paren_lengthening: "(H=)"/"(h=)", case-folded
                 group = m.group("bpl_letter")
                 breath_kind = "breath_out" if group.lower() == "hx" else "breath_in"

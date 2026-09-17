@@ -271,23 +271,29 @@ Write the tokeniser with the A/B switch from the start. Validate the rule on
 its own — given one IU's raw text, show what comes out — before it is used
 anywhere.
 
-**Raises: 5 of 68,815 IUs (0.01%), down from 340 — close to zero, not
-zero.** Every raise is logged (file, line, character, reason) to
-`reports/private/phase2_tokenizer_raises_full.csv`; counts and reasons only
-(no transcript text) in the committed `reports/phase2_tokenizer_raises.csv`.
-SBC012/SBC013's `_`-as-truncation-mark convention is decided and
-implemented (`__` as `--`, `word_` as `word-`), as is a mark directly
-before an unattached `_`/`-` (`%_you`/`%-you`, both become a standalone
-cue rather than raising or fusing), a hyphen sandwiched between brackets
-on both sides, `---`, `0-`/`0.000000e+00-`, most vocal-noise names with
-an embedded bracket or a non-breath `=`, and a `<` followed by a space
-before the tag name — see `reports/phase2_tokeniser.md` §10 for each.
-**What's left, all `(`, all reported not guessed at**: a vocal-noise span
-missing its closing `)` entirely (replaced by nothing, a nested unclosed
-`(H)`/`(Hx)`, or a bracket-then-digit run) in 3 of 5 remaining IUs; `(@Hx)`
-deliberately left alone, since swallowing it would silently drop the
-`Hx` breath cue rather than surface the question of whether to preserve
-it.
+**Raises: 0 of 68,815 IUs.** The last 5 (SBC002, SBC015, SBC019, SBC023,
+SBC056) were closed out as named, file/line-anchored exceptions — not
+general rules — each confirmed to contain zero words on its own (markers
+only) before being fixed. See `reports/phase2_tokeniser.md` §11 for each
+case and its test. Every historical raise is still logged (file, line,
+character, reason) to `reports/private/phase2_tokenizer_raises_full.csv`;
+counts and reasons only (no transcript text) in the committed
+`reports/phase2_tokenizer_raises.csv` (now empty of rows, since nothing
+raises any more — the file and the scripts that populate it are kept for
+the next corpus-affecting change, not deleted).
+
+**Reaching zero raises did not mean the tokeniser was correct everywhere.**
+An independent word-count cross-check (`reports/phase2_tokeniser.md` §12;
+strips everything but letters/apostrophes/hyphens/whitespace per IU and
+counts runs, sharing no code with the tokeniser) found one real,
+previously-silent mis-split, distinct from the bracket-hyphen bug fixed
+earlier this stage: `_handle_displaced_trunc`'s "leading hyphen starts a
+new word" case (`eighty .. -three`) does not flush an already-pending word
+first, so a plain word directly followed by whitespace and a hyphen-led
+word (`uh -gerald`) gets silently fused into one wrong word
+(`uh-gerald`) instead of two. **3 of 68,815 IUs affected, confirmed,
+not fixed** (reports/phase2_tokeniser.md §12) — stage 4 is not final
+until this is decided; see "Where phase 2 stands" below.
 
 ### No genre breakdown
 
@@ -298,8 +304,13 @@ enable. Break results down by document and by document length instead.
 
 ### Where phase 2 stands
 
-Stages 1–3 complete: reading, line structure, `&` merge. Next is the tokeniser,
-per the decisions above, then the LLM run with `n_samples=5` from the start.
+Stages 1–3 complete: reading, line structure, `&` merge. Stage 4 (tokeniser)
+is functionally complete — 0 raises over 68,815 IUs (excl. SBC037), 5,179
+zero-word IUs dropped, 63,636 reference segments — but **not marked final**:
+the independent word-count cross-check (`reports/phase2_tokeniser.md` §12)
+found one open, unattributed bug (`_handle_displaced_trunc`'s leading-hyphen
+case silently fusing across whitespace, 3 IUs) that is reported, not fixed.
+Next: decide that case, then the LLM run with `n_samples=5` from the start.
 
 ## Sampling
 

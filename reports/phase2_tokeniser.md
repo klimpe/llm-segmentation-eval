@@ -933,3 +933,207 @@ guessed at.
 
 106 tokenizer tests pass (up from 97); full suite 634 passed, 11
 skipped.
+
+---
+
+## 11. The last 5 raises: named exceptions, raises to 0
+
+Per the brief: each of the five remaining IUs checked for word content
+*before* any code changed, confirmed on the raw text (not the tokeniser's
+own output, which couldn't run on them yet):
+
+| file | line | raw text | contains a word? |
+|---|---|---|---|
+| SBC002 | 466 | `(TSK (H)3]` | no |
+| SBC015 | 1805 | `[2(H]=2]` | no |
+| SBC019 | 116 | `... (SNIFF .. (Hx) (Hx)=)` | no |
+| SBC023 | 1469 | `[(SNIFF)] [2(SNIFF2]` | no |
+| SBC056 | 1169 | `(@Hx)` | no |
+
+All five are markers only — pauses, vocal-noise names, breath cues,
+lengthening, overlap-bracket leftovers. None was guessed at from this
+table alone; each fix below was implemented against the exact raw text
+above and verified to still produce zero words afterward, matching this
+table rather than contradicting it.
+
+Each of the five, implemented as a named exception anchored to its own
+context (lookbehind/lookahead on the literal surrounding text, the same
+style as the existing `yawn_named_exception`/`stray_close_paren_named_
+exception` — not a general rule for the shape it happens to share with
+others):
+
+- **SBC002** `(TSK (H)3]`: `(TSK` (the orphaned open-paren-plus-name, no
+  closing `)` anywhere in the IU) dropped by `sbc002_tsk_named_exception`,
+  anchored to being followed by ` (H)3]`. The nested `(H)` and the `3]`
+  overlap leftover already tokenised correctly on their own — only the
+  orphaned `(TSK` itself needed a rule.
+- **SBC015** `[2(H]=2]`: the same breath+lengthening compound as the
+  already-handled `(H=)` (`breath_paren_lengthening`), except a numbered
+  overlap bracket sits where the compound's own closing `)` should be —
+  it never appears anywhere in the IU. New compound rule
+  `sbc015_breath_bracket_lengthening_named_exception`, anchored to the
+  exact `[2...2]` context via lookbehind/lookahead, decomposes to
+  `Cue(breath_in, "(H]")` + `Cue(lengthening, "=")`; `[2`/`2]` tokenise
+  normally on either side, unaffected.
+- **SBC019** `... (SNIFF .. (Hx) (Hx)=)`: `(SNIFF` dropped
+  (`sbc019_sniff_open_named_exception`, anchored to the exact following
+  context); the IU's final `)` — otherwise unmatched, since it's actually
+  `(SNIFF`'s own missing close, not any other span's — dropped by a
+  second, symmetric exception (`sbc019_sniff_close_named_exception`,
+  anchored by lookbehind on the preceding literal text). The pause and
+  both `(Hx)` breath cues in between already tokenised correctly.
+- **SBC023** `[(SNIFF)] [2(SNIFF2]`: the first `[(SNIFF)]` was already
+  well-formed and untouched by this change (verified: the new rule's
+  lookbehind requires a preceding `[2`, which only the second occurrence
+  has). The second, `[2(SNIFF2]`, is the bracket-then-digit-run shape —
+  `2]` sits where `SNIFF`'s own `)` should be. New rule
+  `sbc023_sniff_bracket_digit_named_exception`, anchored the same way as
+  SBC015's.
+- **SBC056** `(@Hx)`: laughter `@` had no documented compound for
+  co-occurring with a breath cue (unlike `(%Hx)`'s `glottal_breath`). New
+  compound `sbc056_laughter_breath_named_exception`, a literal anchor (the
+  single corpus occurrence), decomposes to a bare `Cue(breath_out,
+  "(Hx)")` — the `@` is dropped outright, not rendered as its own cue
+  (unlike `glottal_breath`, where the `%` survives as a cue too) — per
+  the brief's own framing, "laughter dropped ... `(Hx)` kept as a cue."
+
+One pre-existing test, `test_at_sign_breath_still_raises`, asserted the
+old raising behaviour for `(@Hx)` in general and had to be updated to
+`test_at_sign_breath_named_exception` (now asserts the fix) plus a new
+`test_at_sign_breath_variant_still_raises` (`(@H)`, a different letter,
+confirms the exception is literal, not general). Six new tests total, one
+per named exception plus the SBC015 anchoring negative-check
+(`test_sbc015_named_exception_does_not_fire_without_bracket_2`) — 113
+tokenizer tests pass (up from 106).
+
+**Whole-corpus rerun: 0 of 68,815 raises (0.00%).** Target reached, this
+time exactly, not "close to zero" — `reports/phase2_tokenizer_raises.csv`
+is now an empty table (header only), kept rather than deleted since the
+scripts that populate it stay live for the next corpus-affecting change.
+
+---
+
+## 12. Independent word-count cross-check: one real, unattributed bug found
+
+Zero raises answers "does every symbol fit a documented tier," not "did
+the rule that fired produce the right word boundaries" — the earlier
+bracket-hyphen bug (§10.2b) produced wrong words with no raise at all,
+and nothing above rules out another instance of that class. Per the
+brief, a second check, sharing no code with `sbcsae_tokenizer.py`
+(`sbcsae_tokenizer_crosscheck.py`, new this session): per IU, strip every
+character except letters, apostrophes, hyphens and whitespace, collapse
+whitespace, count the resulting runs, and compare that count against the
+tokeniser's own word count for the same IU.
+
+**64.56% exact match (44,429 of 68,815); the other 35.44% is a mismatch**,
+overwhelmingly not a tokeniser defect but the naive method's own blind
+spots — it has no concept of a delimiter, so any letters inside a
+parenthetical, tag or bracket construct, or a run consisting only of
+hyphens, count as "words" it has no way to know are markers. Distribution
+of (tokeniser count − independent count), whole corpus:
+
+| diff | IUs | diff | IUs |
+|---|---|---|---|
+| −1 | 18,440 | −6 | 10 |
+| −2 | 4,672 | −7 | 3 |
+| −3 | 951 | −8 | 2 |
+| −4 | 241 | −9 | 1 |
+| −5 | 65 | −10 | 1 |
+
+Every mismatch is negative or zero (the tokeniser never reports *more*
+words than the naive count) — expected, since the naive method only ever
+over-counts (keeps more spurious runs), never under-counts relative to a
+correctly fusing tokeniser.
+
+By best-effort category (each attributed to a specific, already-documented
+tokeniser rule, not decided here — the category assignment is diagnostic
+only):
+
+| category | IUs | cause |
+|---|---|---|
+| `parenthetical_marker` | 11,174 | breath/vocal-noise/research-comment letters inside `(...)`/`((...))`, dropped by the tokeniser, counted as words by the naive method |
+| `hyphen_only_run` | 4,743 | `--`/`---`/isolated `-` is a `Boundary`, not a `Word` — the naive method has no such kind, so any hyphen-only run becomes a spurious "word" |
+| `cue_fusion` | 3,421 | a tier-2 mark (`=^\`!;%\\`) sandwiched mid-word (`s=o`) fuses in the tokeniser, splits the naive method's letter-run in two |
+| `overlap_bracket` | 1,757 | `[...]` content/delimiters |
+| `numbered_overlap_bracket` | 1,649 | `[2...2]` content/delimiters |
+| `angle_tag` | 1,537 | `<TAG ... TAG>`/`<<TAG ... TAG>>` content/delimiters |
+| `underscore_truncation_or_gloss` | 87 | `_` as SBC012/SBC013 truncation, phonetic-gloss suffix, or word-internal joiner |
+| `lost_initial_letter` | 9 | the `0`/`0.000000e+00` artifact family |
+| `at_sign_fusion` | 4 | `@` (laughter/event marker) mid-word, tier-1 drop, fuses |
+| `plus_fusion` | 2 | `+` (event-timing marker) mid-word, tier-1 drop, fuses |
+| **`other`** | **3** | **not attributable — see below** |
+
+**The 3 unattributed cases, in full (per the brief, raw text stays
+terminal-only — not reproduced in this committed report):**
+
+```
+SBC023:1047  Fitz- uh -gerald,        tok=['Fitz-', 'uh-gerald']
+SBC032:1371  Might alw- -so,          tok=['Might', 'alw--so']
+SBC055:264   And we he rela- -turned, tok=['And', 'we', 'he', 'rela--turned']
+```
+
+**Root cause, confirmed, not guessed:** `_handle_displaced_trunc`'s case 4
+("a leading hyphen starting a word," `eighty .. -three` → `start_new`) is
+written for the situation where nothing is pending — true in that example
+because the preceding cue (`..`) already flushed the previous word. It
+does not check whether a word is *already* pending before appending the
+hyphen; when the immediately preceding token was an ordinary word ended
+only by whitespace (no intervening cue/boundary to flush it), that
+pending word is still open, and the hyphen — meant to *start a new
+word* — is silently appended onto it instead. `uh -gerald` (a complete
+word, then a truncated fragment) becomes one wrong word, `uh-gerald`,
+with **no raise**: exactly the "silent mis-split" class the brief warned
+raise-on-unknown does not cover. Confirmed directly, not inferred from
+the category alone: for each candidate IU, the fused `Word.raw` was
+checked against the source text and found *not* to occur there as a
+substring — proof the tokeniser produced text that doesn't correspond to
+any contiguous span of the actual IU.
+
+**Scope, checked against the corpus, not assumed**: a targeted scan for
+the structural pattern (`\S\s+-[A-Za-z]`: some non-space character, then
+whitespace, then a hyphen directly glued to a letter) found 14 candidate
+IUs corpus-wide; of those, exactly these 3 tokenise into a word whose
+`raw` doesn't appear verbatim in the source — the other 11 are cases
+where the preceding token was already a cue/boundary (nothing pending),
+so case 4 behaves as documented.
+
+**Not fixed in this step, per the brief.** `reports/phase2_tokenizer_
+crosscheck_summary.csv` (committed: diff/category/count only) and
+`reports/private/phase2_tokenizer_crosscheck_full.csv` (gitignored: full
+per-IU rows, has transcript text) are the persisted evidence;
+`sbcsae_tokenizer_crosscheck.py` reproduces both from a clean run.
+
+---
+
+## 13. Final figures, and stage-4 status
+
+Whole-corpus, current code, SBC037 excluded throughout (59 files):
+
+- **68,815 IUs, 0 raises (0.00%).**
+- **5,179 zero-word IUs** dropped from the reference (identically under A
+  and B); **63,636 reference segments** remain (`reports/
+  phase2_reference_segments_by_file.csv`, full 59-file table).
+- 113 tokenizer tests pass (up from 106 at the start of this session);
+  full suite **642 passed, 11 skipped** (up from 634).
+- `tests/test_no_transcript_leaks.py` strengthened per the brief: a
+  blocklist of text-like column names became an allowlist of expected
+  columns per committed CSV (`ALLOWED_COLUMNS`, one entry per file under
+  `reports/`/`results/`) — any column not on a file's list fails the
+  test, whether or not it looks text-like, so a new column requires
+  updating that table as an explicit decision. The pre-existing content
+  check (populated text-like column, minus the 14-row
+  `phase2_excluded_lines.csv` exception) is unchanged and still the thing
+  that would catch a leak into a column already on the allowlist.
+  Verified both directions: a synthetic extra column fails the new test;
+  reverting it passes again.
+
+**Stage 4 is not marked final.** Every raise-based check from earlier
+sessions now reads zero, but §12's independent cross-check — a
+fundamentally different check, immune to the "no raise" blind spot —
+found one real, confirmed, unattributed silent mis-split
+(`_handle_displaced_trunc`'s leading-hyphen case, 3 IUs). Per the brief's
+own instruction, this is reported as open, not folded into "final" by
+proximity to zero. Next open item: decide what to do about it (the fix is
+straightforward — flush a pending word before case 4's `start_new`
+appends the hyphen — but per this step's brief, deciding and implementing
+that fix was explicitly out of scope here).

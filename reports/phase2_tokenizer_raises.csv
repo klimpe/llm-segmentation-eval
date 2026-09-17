@@ -1,2 +1,1 @@
 char,codepoint,count,files,reason
-(,U+0028,5,5,"case-folded or mark-embedded vocal-noise annotation not covered by S1e (a lowercase name, e.g. '(throat)', or a mark such as '=' glued inside plain parens, e.g. '(H=)') -- not authorised"

@@ -3,12 +3,14 @@ NUL-byte CSVs, then sbcsae_marker_inventory.py's no-tier-examples CSV):
 a script silently writing full transcript text into a CSV under reports/
 or results/ (committed, public) instead of reports/private/ (gitignored).
 
-Scans every CSV actually on disk under reports/ and results/ (not
-reports/private/) for a text-like column and asserts it is empty --
-except phase2_excluded_lines.csv's 14 original rows ($ / backslash-fused /
-ambiguous-field), which have always carried short content by design (Du
-Bois researcher notes and transcription artifacts, not participant
-speech) and are the one documented exception.
+Was a blocklist of text-like column names (text/context/content/raw/
+iu_text). Strengthened this session to an allowlist of expected columns
+per committed CSV (ALLOWED_COLUMNS below): any column a script writes that
+isn't on that file's list fails the test, so adding one -- text-like or
+not -- requires an explicit decision here rather than silently going out
+in a rerun. The content check below (empty except the 14-row exception) is
+unchanged and still the thing that actually catches a leak in a column
+already on the allowlist, such as "content" in phase2_excluded_lines.csv.
 """
 import csv
 from pathlib import Path
@@ -17,6 +19,82 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 TEXT_LIKE_COLUMNS = {"text", "context", "content", "raw", "iu_text"}
 ALLOWED_EXCEPTION_FILE = "phase2_excluded_lines.csv"
 ALLOWED_EXCEPTION_REASONS = {"dubois_dollar_note", "backslash_fused", "ambiguous_fields"}
+
+# Keyed by "<reports|results>/<filename>.csv" -- every committed CSV this
+# stage's scripts write, with its exact current column set. A script that
+# starts writing a new column (or a whole new committed CSV, which shows
+# up here as a "not on the allowlist" failure for the file itself) must
+# update this table in the same commit as an explicit decision, not as a
+# side effect of a rerun.
+ALLOWED_COLUMNS = {
+    "reports/phase2_excluded_lines.csv": {"file", "line", "reason", "content"},
+    "reports/phase2_marker_inventory.csv": {
+        "class", "tier", "count", "files",
+        "before_first_word", "between_words", "after_last_word", "iu_has_no_words",
+    },
+    "reports/phase2_marker_no_tier.csv": {"pattern", "count", "files"},
+    "reports/phase2_marker_no_tier_examples.csv": {"pattern", "file", "line"},
+    "reports/phase2_merge_counts.csv": {"file", "raw_lines", "merged_units", "merges"},
+    "reports/phase2_nul_bytes.csv": {"file", "line", "byte"},
+    "reports/phase2_reference_segments_by_file.csv": {
+        "file", "segments_before", "segments_after", "dropped",
+    },
+    "reports/phase2_speaker_colon_fix.csv": {
+        "file", "raw_line", "iu_index", "old_speaker", "new_speaker", "in_amp_chain", "cause",
+    },
+    "reports/phase2_tokenizer_crosscheck_summary.csv": {"diff", "category", "count"},
+    "reports/phase2_tokenizer_raises.csv": {"char", "codepoint", "count", "files", "reason"},
+    "reports/phase2_tokenizer_summary.csv": {"metric", "value"},
+    "reports/phase2_tokenizer_words_per_iu.csv": {"n_words", "n_ius"},
+    "reports/phase2_tokenizer_zero_word_by_file.csv": {"file", "zero_word_ius"},
+    "reports/phase2_tokenizer_zero_word_composition.csv": {"composition", "count"},
+    "results/eng.rst.gum_dev_excluded.csv": {"doc_id", "masked_fraction", "reason"},
+    "results/eng.rst.gum_dev_failures.csv": {"doc_id", "reason"},
+    "results/eng.rst.gum_dev_masking.csv": {"doc_id", "n_tokens", "masked_fraction"},
+    "results/eng.rst.gum_dev_per_document.csv": {
+        "doc_id", "genre", "n_tokens", "ref_segs", "hyp_segs",
+        "precision", "recall", "f1", "window_diff", "boundary_similarity",
+    },
+    "results/eng.rst.gum_dev_per_genre.csv": {
+        "genre", "n_docs", "mean_f1", "mean_window_diff", "mean_boundary_similarity",
+        "micro_precision", "micro_recall", "micro_f1",
+    },
+    "results/eng.rst.gum_dev_resampling_failures.csv": {
+        "group", "doc_id", "genre", "condition", "sample", "reason",
+    },
+    "results/eng.rst.gum_dev_resampling_per_sample.csv": {
+        "group", "doc_id", "genre", "condition", "sample",
+        "precision", "recall", "f1", "hyp_segs", "trailing_collapse_run",
+    },
+    "results/eng.rst.gum_dev_resampling_summary.csv": {
+        "group", "doc_id", "genre", "condition", "n_samples",
+        "precision_mean", "precision_min", "precision_max",
+        "recall_mean", "recall_min", "recall_max",
+        "f1_mean", "f1_min", "f1_max", "max_trailing_collapse_run",
+    },
+    "results/eng.rst.gum_dev_summary.csv": {"metric", "value"},
+    "results/eng.rst.gum_dev_zero_vs_fewshot_per_document.csv": {
+        "doc_id", "genre",
+        "zeroshot_precision", "fewshot_precision",
+        "zeroshot_recall", "fewshot_recall",
+        "zeroshot_f1", "fewshot_f1",
+        "zeroshot_window_diff", "fewshot_window_diff",
+        "zeroshot_boundary_similarity", "fewshot_boundary_similarity",
+    },
+    "results/eng.rst.gum_dev_zero_vs_fewshot_per_genre.csv": {
+        "genre", "n_docs",
+        "zeroshot_micro_precision", "fewshot_micro_precision",
+        "zeroshot_micro_recall", "fewshot_micro_recall",
+        "zeroshot_micro_f1", "fewshot_micro_f1",
+    },
+    "results/eng.rst.gum_dev_zero_vs_fewshot_segment_ratios.csv": {
+        "doc_id", "genre", "ref_segs",
+        "zeroshot_hyp_segs", "fewshot_hyp_segs", "zeroshot_ratio", "fewshot_ratio",
+    },
+    "results/eng.rst.gum_dev_zero_vs_fewshot_summary.csv": {
+        "metric", "zero_shot", "few_shot", "delta",
+    },
+}
 
 
 def _report_and_result_csvs():
@@ -30,6 +108,23 @@ def _report_and_result_csvs():
                 continue
             csvs.append(path)
     return csvs
+
+
+def test_every_committed_csv_column_is_on_the_allowlist():
+    offenders = []
+    for path in _report_and_result_csvs():
+        key = str(path.relative_to(REPO_ROOT)).replace("\\", "/")
+        with open(path, newline="", encoding="utf-8") as f:
+            fieldnames = set(csv.DictReader(f).fieldnames or [])
+        allowed = ALLOWED_COLUMNS.get(key)
+        if allowed is None:
+            offenders.append(f"{key}: not on ALLOWED_COLUMNS -- new committed CSV needs an explicit decision")
+            continue
+        extra = fieldnames - allowed
+        if extra:
+            offenders.append(f"{key}: unexpected column(s) {sorted(extra)} not on the allowlist")
+
+    assert not offenders, "committed CSV column(s) outside the allowlist:\n" + "\n".join(offenders)
 
 
 def test_no_committed_csv_has_a_populated_text_like_column():

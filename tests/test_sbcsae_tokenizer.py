@@ -497,12 +497,22 @@ def test_vocal_noise_non_breath_with_lengthening_dropped_whole():
     assert [w.text for w in words_only(items)] == ["word"]
 
 
-def test_at_sign_breath_still_raises():
-    # Deliberately not fixed by the S2e widening -- see the rule-table
-    # comment: swallowing this would silently drop the "Hx" breath cue
-    # rather than surfacing it as its own decision.
+def test_at_sign_breath_named_exception():
+    # SBC056 line 1169, closed out this session (reports/
+    # phase2_tokeniser.md S10.2f): "(@Hx)" now decomposes to a bare
+    # breath_out cue -- see test_sbc056_laughter_breath_named_exception.
+    # Not the S2e widening (that stays deliberately unfixed for the
+    # general "@" + first-character-class case) -- a literal, anchored
+    # exception for this one construct.
+    items = tokenize("(@Hx) word")
+    assert [w.text for w in words_only(items)] == ["word"]
+
+
+def test_at_sign_breath_variant_still_raises():
+    # Not a general "@ inside a breath annotation" rule -- only the exact
+    # "(@Hx)" literal is authorised. A different letter still raises.
     with pytest.raises(TokenizeError):
-        tokenize("(@Hx) word")
+        tokenize("(@H) word")
 
 
 def test_angle_open_with_space_before_tag_name():
@@ -684,6 +694,60 @@ def test_breath_bracket_lengthening_compound():
     cues = [it for it in items if isinstance(it, Cue)]
     assert [c.kind for c in cues] == ["breath_out", "lengthening"]
     assert [w.text for w in words_only(items)] == ["word"]
+
+
+def test_sbc002_tsk_named_exception():
+    # SBC002 line 466: "(TSK (H)3]" -- orphaned "(TSK" (no closing paren)
+    # dropped; the nested "(H)" is an ordinary breath_in cue; "3]" is an
+    # ordinary overlap-num-close leftover. Zero words in this IU.
+    items = tokenize("(TSK (H)3]")
+    assert words_only(items) == []
+    assert [c.kind for c in items if isinstance(c, Cue)] == ["breath_in"]
+
+
+def test_sbc015_breath_bracket_lengthening_named_exception():
+    # SBC015 line 1805: "[2(H]=2]" -- a numbered overlap bracket landed
+    # where "(H=)"'s own closing ")" should be. Decomposes the same way
+    # as breath_paren_lengthening (breath_in + lengthening). Zero words.
+    items = tokenize("[2(H]=2]")
+    assert words_only(items) == []
+    cues = [c.kind for c in items if isinstance(c, Cue)]
+    assert cues == ["breath_in", "lengthening"]
+
+
+def test_sbc015_named_exception_does_not_fire_without_bracket_2():
+    # Anchored to the exact "[2 ... 2]" context -- must not become a
+    # general "]" substitutes for ")" rule.
+    with pytest.raises(TokenizeError):
+        tokenize("(H]=2]")
+
+
+def test_sbc019_sniff_named_exceptions():
+    # SBC019 line 116: "... (SNIFF .. (Hx) (Hx)=)" -- "(SNIFF" dropped
+    # (its own close never appears), the trailing ")" is that orphaned
+    # close. The pause and both breath_out cues survive; zero words.
+    items = tokenize("... (SNIFF .. (Hx) (Hx)=)")
+    assert words_only(items) == []
+    cues = [c.kind for c in items if isinstance(c, Cue)]
+    assert cues == ["pause_long", "pause_short", "breath_out", "breath_out", "lengthening"]
+
+
+def test_sbc023_sniff_bracket_digit_named_exception():
+    # SBC023 line 1469: "[(SNIFF)] [2(SNIFF2]" -- the first "[(SNIFF)]"
+    # is well-formed and tokenises normally; the second, "[2(SNIFF2]", is
+    # the bracket-then-digit-run shape and needs the named exception.
+    # Zero words either way.
+    items = tokenize("[(SNIFF)] [2(SNIFF2]")
+    assert words_only(items) == []
+
+
+def test_sbc056_laughter_breath_named_exception():
+    # SBC056 line 1169: "(@Hx)" -- laughter dropped, breath_out survives
+    # alone (not decomposed into two cues, unlike glottal_breath). Zero
+    # words.
+    items = tokenize("(@Hx)")
+    assert words_only(items) == []
+    assert [c.kind for c in items if isinstance(c, Cue)] == ["breath_out"]
 
 
 def test_dog_barking_named_exception():
