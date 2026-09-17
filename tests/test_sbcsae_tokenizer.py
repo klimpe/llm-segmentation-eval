@@ -92,6 +92,78 @@ def test_word_truncation():
     assert words == ["y-"]
 
 
+def test_doubled_cue_mark_fuses():
+    # Bug fixed this session (reports/phase2_tokeniser.md S14.3/S15):
+    # _sandwiched() used to look only one match ahead, so a RUN of 2+
+    # glued cue marks between two word fragments (here two lengthening
+    # marks) looked unsandwiched to every cue but the last, flushing the
+    # word early -- "b", "itch" instead of "bitch". Real corpus IU,
+    # SBC006 line 288.
+    raw = "b==itch"
+    words = assert_ab_identical(raw)
+    assert words == ["bitch"]
+
+
+def test_mixed_cue_kinds_in_a_run_fuse():
+    # A run doesn't have to be the same mark repeated -- any glued
+    # sequence of cue-kind matches between two frags must fuse.
+    items = tokenize("s=%o")
+    assert [w.text for w in words_only(items)] == ["so"]
+
+
+def test_three_glued_cue_marks_fuse():
+    items = tokenize("s=%=o")
+    assert [w.text for w in words_only(items)] == ["so"]
+
+
+def test_doubled_cue_run_through_overlap_brackets_still_fuses():
+    # SBC048 line 468, real corpus: "No3][4==t at4] a=ll" -- the doubled
+    # "=" sits right before the frag, but the word it belongs to ("No")
+    # is separated from it by two numbered-overlap-bracket delimiters.
+    # Confirms the fix composes with the existing drop-delimiter fusion
+    # logic rather than needing its own special case for this shape.
+    items = tokenize("No3][4==t")
+    assert [w.text for w in words_only(items)] == ["Not"]
+
+
+def test_doubled_cue_fusion_all_caps_case():
+    # SBC054, real corpus: the split-off piece was entirely uppercase
+    # ("R", "un" instead of "Run") -- not visible to a lowercase-only
+    # check, but the same tokeniser bug and the same fix.
+    items = tokenize("R==un")
+    assert [w.text for w in words_only(items)] == ["Run"]
+
+
+def test_cue_then_overlap_bracket_fuses():
+    # Second, distinct one-hop-lookahead gap found and fixed alongside
+    # the doubled-cue case (reports/phase2_tokeniser.md S15): a single
+    # cue mark immediately followed by a glued overlap-bracket delimiter
+    # before the frag ("fa=]st?", real corpus, SBC002) -- checking only
+    # one match ahead saw the "]", not "st", and flushed early. The
+    # bracket is exactly as incidental here as it already is for a plain
+    # drop-kind delimiter with no cue in front of it.
+    items = tokenize("fa=]st?")
+    assert [w.text for w in words_only(items)] == ["fast"]
+
+
+def test_cue_then_numbered_overlap_bracket_fuses():
+    # SBC004, real corpus: "[2u=2]m," -- cue, then TWO glued drop-kind
+    # matches ("2]"), before the frag.
+    items = tokenize("[2u=2]m,")
+    assert [w.text for w in words_only(items)] == ["um"]
+
+
+def test_cue_then_bracket_not_fused_when_nothing_follows():
+    # The walk must still fail correctly when no frag is ever reached --
+    # not a blanket "always fuse a cue before a bracket" rule. "word=["
+    # ends the IU with the bracket unclosed and nothing after it: "word"
+    # stays its own complete word, and the lengthening mark surfaces as
+    # its own Cue rather than being silently swallowed or fused.
+    items = tokenize("word=[")
+    assert [w.text for w in words_only(items)] == ["word"]
+    assert [c.kind for c in items if isinstance(c, Cue)] == ["lengthening"]
+
+
 def test_hyphenated_compound():
     raw = "twenty-two"
     words = assert_ab_identical(raw)

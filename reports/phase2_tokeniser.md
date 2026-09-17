@@ -1322,3 +1322,250 @@ Next open item: fix `_sandwiched()`'s one-match lookahead the same way
 `_glued_frag_follows` already fixes the analogous hyphen case (walk past
 a run of glued cue marks, not just one), then re-run every check in
 §11-§14 again before reconsidering "final."
+
+---
+
+## 15. `_sandwiched()` fixed; a full audit of one-hop lookahead
+
+### 15.1 The fix, in two parts
+
+`_sandwiched()`'s forward check used to look exactly one match ahead: is
+the *next* match a `frag`/`displaced_trunc`? Two distinct real-corpus
+shapes broke that, both fixed together in
+`_glued_frag_or_trunc_follows_through_cues` (walks forward through any
+number of glued matches, not just zero or one, mirroring
+`_glued_frag_follows`):
+
+- **A run of 2+ glued cue marks** (§14.3's `b==itch`): the match right
+  after the first `=` is the second `=` (kind `cue`), not the frag.
+- **A single cue immediately followed by a glued "drop"-kind delimiter**
+  (`fa=]st?`, `do=[ing,`, `[2u=2]m,` — found while fixing the first
+  shape, not part of the original 9): the match right after `=` is `]`
+  (kind `drop`), not the frag. The delimiter is exactly as incidental
+  here as it already is in the plain drop-fusion case with no cue in
+  front of it.
+
+Both are the same root cause: forward-lookahead that only checks the
+immediate next match, not a whole glued chain. All 9 §14.3 IUs, plus the
+newly-found drop-after-cue shape, now fuse correctly:
+
+```
+b==itch.                    -> bitch        (was b, itch)
+cu==z,                      -> cuz          (was cu, z)
+gro==ss4].                  -> gross        (was gro, ss)
+b==odies                    -> bodies       (was b, odies)
+f==ifty,                    -> fifty        (was f, ifty)
+f==orty-nine,                -> forty-nine   (was f, orty-nine)
+No3][4==t at4] a=ll         -> Not, at, all (was No, t, at, all)
+R==un boy                   -> Run, boy     (was R, un, boy)
+R==un                       -> Run          (was R, un)
+fa=]st?                     -> fast         (was fa, st)
+do=[ing,                    -> doing        (was do, ing)
+bow=[2=l2].                 -> bowl         (was bow, l)
+a=]typical                  -> atypical     (was a, typical)
+[2u=2]m,                    -> um           (was u, m)
+```
+
+8 new tests (`test_doubled_cue_mark_fuses`,
+`test_mixed_cue_kinds_in_a_run_fuse`, `test_three_glued_cue_marks_fuse`,
+`test_doubled_cue_run_through_overlap_brackets_still_fuses`,
+`test_doubled_cue_fusion_all_caps_case`,
+`test_cue_then_overlap_bracket_fuses`,
+`test_cue_then_numbered_overlap_bracket_fuses`,
+`test_cue_then_bracket_not_fused_when_nothing_follows`) — 125 tokenizer
+tests pass (up from 117 at the start of this session).
+
+### 15.2 Every other one-hop-lookahead site, audited
+
+Per the brief: every place in `sbcsae_tokenizer.py` that looks only one
+match ahead or behind, checked against the whole corpus for whether a
+longer run actually reaches it (not just theoretically could).
+
+| site | direction | what it checks | longer run reaches it? | fixed? |
+|---|---|---|---|---|
+| `_sandwiched` forward walk | forward | is a frag/displaced_trunc eventually reachable through glued cue/drop matches | **yes** — 9 + 5 real IUs (§15.1) | **yes**, this session |
+| `_glued_frag_follows` | forward | is a frag eventually reachable through glued drop matches (for `_handle_displaced_trunc`'s `glued_after`) | checked directly: compared its drop-only walk against a drop-**or-cue** walk over every `displaced_trunc` match corpus-wide — **0 differences** | no — nothing to fix |
+| `_sandwiched` left check (`matches[i-1]`) | backward, 1 hop | is the *immediately preceding* match glued to this cue | not applicable — this only classifies the immediate neighbour; whether a word is actually open is carried by `pending_active` state, which the (now-fixed) forward walks maintain correctly across arbitrarily long chains. No case where reaching further back would change the answer. | no |
+| `_handle_displaced_trunc`'s `prev_name = matches[i-1].lastgroup` | backward, 1 hop | is the immediately preceding match `lengthening`/`glottal`/`drop` | same reasoning as above — classification only, `pending_active` carries the rest | no |
+
+Only `_sandwiched`'s forward walk was a real, corpus-confirmed gap.
+`_glued_frag_follows` was checked, not assumed clean: a direct
+corpus-wide comparison (drop-only vs. drop-or-cue walk from every
+`displaced_trunc` match) found zero IUs where the two disagree, so
+widening it would change nothing real and wasn't done. The two
+single-hop *backward* checks are backward by design, not by omission —
+they classify a neighbour; they don't need to reach through a chain,
+because the sequential nature of `tokenize()`'s main loop already
+maintains the relevant state (`pending_active`, the pending piece lists)
+correctly across however many matches came before.
+
+Whole-corpus rerun: **0 of 68,815 raises**, unchanged.
+
+---
+
+## 16. Invariant (d): no wrongful splits
+
+(a) catches a word's letters spanning two chunks; (b) catches a chunk's
+letters going missing from every word. Neither catches a chunk whose
+letters all survive, in order, but end up as **two or more separate
+words** instead of one — exactly what §14/§15's bugs did
+(`b==itch` → `b`, `itch`: nothing is lost, nothing is fused across
+whitespace, so (a) and (b) are both silent on it).
+
+**Method** (`check_no_wrongful_splits`, `sbcsae_tokenizer_invariants.py`
+— shares no code with the tokeniser): for every whitespace-delimited
+chunk, walk chunks and emitted words in parallel, in strict left-to-right
+order. (a) already guarantees a word's letters live within exactly one
+chunk, so each word can be assigned to the first chunk — never
+backtracking across chunks, and never reusing already-consumed letters
+within one, via a monotonic within-chunk cursor — whose own letters
+contain it from the current cursor position onward. Both cursors only
+ever advance, which is what keeps a short, common word (`a`, `I`) from
+being coincidentally reattributed to an unrelated earlier chunk. A chunk
+assigned 2+ words is a violation unless a documented rule explains **the
+literal gap between each consecutive pair of assigned words** (not
+merely something present elsewhere in the chunk — see §17 for why that
+distinction matters).
+
+**Result: 21 violations, 0 unattributed.** Every one is explained by
+exactly one of three mechanisms, checked against the literal text
+*between* the two words it's meant to explain, not just presence
+anywhere in the chunk:
+
+| category | count | mechanism |
+|---|---|---|
+| `underscore_truncation_ends_word` | 10 | a bare, unattached `_` always either flushes the pending word with a trailing `-` or becomes its own standalone cue (SBC012/SBC013's convention, CLAUDE.md) — either way nothing fuses through it, the same functional role as a Boundary, just not literally that token kind |
+| `displaced_truncation_flush` | 6 | `=-`/`%-` always ends a word (§9.3/`_handle_displaced_trunc` case 1) |
+| `boundary_inside_chunk` | 5 | a literal `.`/`,`/`?`/`--` genuinely sits between the two words |
+
+Two of the ten `underscore_truncation_ends_word` cases
+(`some_p=_[2thing=` → `some_p`, `thing`; `a(Hx)_I` → `a`, `I`) surface a
+real, previously-undecided interaction: a cue or drop-kind mark glued
+directly before a bare `_` with nothing pending stops `_sandwiched`'s
+walk (kind `underscore_trunc` isn't `cue`/`drop`/`frag`), so whatever
+came before it never gets a chance to fuse across. Investigated, not
+changed: extending the walk through `underscore_trunc` would mean
+letting an `=`/`(Hx)` reach *through* a mark whose own documented job is
+to end things — `a` and `I` are two genuinely separate real words here,
+not a mis-split, so leaving this alone is very likely correct, but it
+wasn't a foregone conclusion going in and is recorded as reasoned-through
+rather than assumed.
+
+Added to `tests/test_tokenizer_invariants.py`
+(`test_d_no_wrongful_splits_all_attributable`): asserts every category is
+on the known-three list and `other` is empty, so a genuinely new
+wrongful-split shape fails loudly instead of silently passing.
+
+---
+
+## 17. Verifying (b)'s "delimiters, never letters" categories
+
+Five (b) categories are supposed to remove only delimiter characters,
+never real letters: `overlap_bracket`, `angle_tag`, `disguise_prefix`,
+`at_sign_fusion`, `underscore_truncation_or_gloss`. Per the brief, the
+same check used for `internal_capital_in_kept_word`: strip *only* each
+category's own delimiter characters (case preserved otherwise) and
+confirm the remainder is a contiguous substring of the concatenation of
+the IU's emitted words.
+
+**Three categories fully verified, zero failures**: `disguise_prefix`
+(4/4), `at_sign_fusion` (1/1), `underscore_truncation_or_gloss` (8/8) —
+every letter in every one of these 13 chunks survives into some emitted
+word once only `~`/`#`/`*`, `@`, or `_`/`/` are stripped. These three
+rules do exactly what they claim.
+
+**`overlap_bracket`'s own 23 (b)-violations, re-examined, are not
+actually caused by overlap brackets.** Stripping only `[`/`]`/digits
+left 10 with real content still missing — but in every one of the 10, an
+angle-tag delimiter (`<`, `@`, `>`) was *also* present in the same chunk,
+and it, not the bracket, was the actual cause: `_category`'s own
+priority order checks for a bracket before an angle tag, so a chunk
+containing both got bucketed under the wrong one — the same count-level,
+"any delimiter present passes as explained" flaw §14.2 replaced the
+cross-check to avoid, just recurring one level down, inside a single
+category's own attribution. Confirmed by running `tokenize()` directly
+on all 10: the bracket's own content fuses correctly every time; the
+angle-tag construct is what's swallowing letters (§17.1).
+
+**`parenthetical_marker` (1,108), spot-verified**: for every chunk,
+stripping every well-formed `(...)` span and checking whether any
+lowercase letters remain finds exactly 4 apparent failures. Investigated
+each directly: **3 are false alarms of the verification method, not the
+tokeniser** — the letters *do* survive as their own already-correct
+words (`(Hx)g` → word `g`; `(Hx)_every day is,` → words `every`, `day`,
+`is`); they only look "missing" because the naive check demands the
+remainder fit inside the *same* chunk's own reconstruction rather than
+being findable among the IU's words generally (exactly the distinction
+§14.2's `boundary_or_multiword_split` category already exists to handle
+for check (b) proper — this ad hoc verification script just didn't reuse
+it). The 4th (`(TSK)<@Oh[2=@>2].`) is real, and is the same angle-tag bug
+as everything else in this section, not a new parenthetical-marker
+defect. **Net: 1,108 of 1,108 genuinely confirmed** — the missing
+letters really are exactly the letters inside the marker, once the one
+angle-tag-caused exception is set aside.
+
+### 17.1 A new, real bug: the angle-tag regex swallows glued content
+
+Root cause, confirmed against the tokeniser's own matching: `angle_open`
+(`<[A-Za-z0-9@%]+`), `angle_close` (`[A-Za-z0-9@%]+>`), and `angle_wrap`
+(`<[A-Za-z0-9@%]+>`) all match the tag's delimiter *and* its name as one
+token, with no way to tell "a short arbitrary tag code" from "real
+speech glued directly to the delimiter with no space." A whole-corpus
+scan of every single-angle match's name against the set of tag codes
+this project has already confirmed genuine (`VOX`, `WH`, `Q`, `SM`, `F`,
+`PAR`, `P`, `HI`, `READ`, `X`, `L2`, `MRC`, plus 20 more found and
+confirmed *by this same scan* — `L`, `FOOD`, `SING`, `BR`, `YELL`, `A`,
+`FF`, `SHOUT`, `W`, `SMOKING`, `PP`, `DRINKING`, `CRY`, `ACC`, `SLUR`,
+`ACCENT`, `WI`, `CRK`, `SIGH`, `NONSENSE` — every one all-caps, each
+appearing as a matched open/close pair) found **19 instances where the
+matched name contains a lowercase letter** — a signal that never occurs
+for a genuine tag code in this corpus, confirmed exhaustively, not
+assumed. On manual review, **17 are high-confidence real content loss**
+(`<@Mm@>` swallows the filler "Mm"; `Go]=dX>.` swallows the `d` that
+completes "God"; `<@in San...` swallows "in"; and 14 more of the same
+shape — `She`, `couch`, `No`, `Do`, `he`, `Oh` ×2 (via `<XOh` and
+`<@Oh`), `or` ×2 (direct and via the `0r` lost-initial-letter form),
+`but` (swallowed from *both* ends, `Xbu`/`tX`), `know`); **2 are
+lower-confidence** — a `Hi`/`HI` pair and an `X`/`x` pair, each used
+consistently as both open and close, which could be a genuine, if
+case-inconsistent, tag rather than swallowed content, and are reported
+as uncertain rather than decided either way. A further, distinct
+instance — `[XX>]` swallowing the corpus's own documented indecipherable-
+syllable marker `XX` — is all-caps and so isn't caught by the
+lowercase signal; found separately, reported, not folded into the
+pinned count.
+
+**Not fixed.** Deciding this needs a real design choice (how to tell a
+tag name from glued real content — a fixed enumerated code list, a
+length/shape heuristic, a space-insertion convention change?) that's out
+of scope for a verification step. Pinned in
+`tests/test_tokenizer_invariants.py`
+(`test_angle_tag_content_swallowing_is_pinned_open_bug`, count 19) so a
+regression is caught even though the bug itself stays open.
+
+---
+
+## 18. Final figures and stage-4 status
+
+Whole-corpus, current code, SBC037 excluded throughout (59 files):
+
+- **68,815 IUs, 0 raises (0.00%).**
+- **5,179 zero-word IUs** dropped; **63,636 reference segments** remain
+  — unchanged in count from §14, since §15's fusion fixes only affected
+  IUs that already had at least one word.
+- 125 tokenizer tests pass (up from 117 at the start of this session);
+  full suite **659 passed, 11 skipped** (up from 650).
+- Invariant (d) added to `tests/test_tokenizer_invariants.py`, alongside
+  (a)/(b)/(c) from §14.4. `sbcsae_tokenizer_crosscheck.py` (§12) is
+  unchanged, kept as-is per the brief.
+
+**Stage 4 is still not marked final.** (a) and (d) now have zero
+violations, and every (b) category has been individually verified — but
+that verification itself surfaced a real, new, unattributed bug (§17.1,
+the angle-tag content-swallowing regex, 19 confirmed-or-candidate
+instances). Per the brief's own criterion ("mark stage 4 final only if
+(a), (d) and the verified (b) have no violations outside documented
+rules"), this is exactly the "outside documented rules" case. Next open
+item: decide how the tokeniser should distinguish a tag name from real
+content glued to an angle-tag delimiter, implement it, then re-run every
+check in §11-§18 again before reconsidering "final."

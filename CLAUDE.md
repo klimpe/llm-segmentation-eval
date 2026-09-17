@@ -298,14 +298,40 @@ themselves before deciding what the hyphen does.
 Word-level invariants (`reports/phase2_tokeniser.md` §14.2, replacing the
 count-level cross-check, which attributed a real error to *any* delimiter
 present anywhere in the same IU rather than the one that actually caused
-it) found a second, different bug: `_sandwiched()` only looks one match
-ahead, so a *run* of 2+ glued cue marks between two word fragments
-(`b==itch.`) breaks fusion the same way the already-fixed bracket-hyphen
-case did (`_glued_frag_follows`) — just never patched here. **9 of
-68,815 IUs affected (7 visible to the lowercase-only "lost words" check,
-2 more found by direct structural confirmation), confirmed, not fixed**
-(`reports/phase2_tokeniser.md` §14.3) — stage 4 is still not final; see
-"Where phase 2 stands" below.
+it) found a second bug: `_sandwiched()` only looked one match ahead, so a
+*run* of 2+ glued cue marks between two word fragments (`b==itch.`), or a
+single cue immediately followed by a glued overlap-bracket delimiter
+(`fa=]st?`), broke fusion the same way the already-fixed bracket-hyphen
+case did — just never patched here. **Fixed** (`reports/
+phase2_tokeniser.md` §15.1) — the forward walk now passes through any
+number of glued cue or drop matches, not just one. Every other one-hop
+lookahead site in the tokeniser was then audited (§15.2): only this one
+was a real, corpus-confirmed gap.
+
+**A fourth invariant, (d) no wrongful splits** (`reports/
+phase2_tokeniser.md` §16), catches what (a)/(b) can't: a chunk whose
+letters all survive, in order, but end up as 2+ separate words instead
+of one. **21 violations, all explained** by one of three mechanisms — a
+literal Boundary (`.`/`,`/`?`) between the words, a displaced-truncation
+flush (`=-`/`%-`), or SBC012/SBC013's bare-`_` truncation convention
+(documented above under "Tokenisation") — none outside a documented
+rule.
+
+**Verifying (b)'s "delimiters, never letters" categories found a third,
+new, still-open bug.** `overlap_bracket`, `disguise_prefix`,
+`at_sign_fusion`, and `underscore_truncation_or_gloss` all check out
+clean. But the single-angle tag regexes (`angle_open`/`angle_close`/
+`angle_wrap`) match the delimiter *and* the tag name as one greedy
+token, with no way to tell a short arbitrary tag code from real speech
+glued directly to the delimiter with no space — confirmed by an
+exhaustive scan: every genuine tag code in this corpus is all-caps, and
+**19 instances** have a lowercase letter in the matched name (`<@Mm@>`
+swallows the filler "Mm"; `<@in San...` swallows the preposition "in";
+`Go]=dX>.` swallows the `d` that completes "God"; 16 more of the same
+shape). **Confirmed, not fixed** (`reports/phase2_tokeniser.md` §17.1) —
+deciding how to tell a tag name from glued real content is a real design
+question, out of scope for a verification step. Stage 4 is still not
+final; see "Where phase 2 stands" below.
 
 ### No genre breakdown
 
@@ -318,17 +344,17 @@ enable. Break results down by document and by document length instead.
 
 Stages 1–3 complete: reading, line structure, `&` merge. Stage 4
 (tokeniser): 0 raises over 68,815 IUs (excl. SBC037), 5,179 zero-word IUs
-dropped, 63,636 reference segments; the pending-word bug
-(`_handle_displaced_trunc`, `uh -gerald` → `uh-gerald`) is fixed. **Not
-marked final**: word-level invariants (`reports/phase2_tokeniser.md`
-§14.2-14.3) found a second, different, still-open bug — `_sandwiched()`'s
-one-match lookahead breaks on a run of 2+ glued cue marks between two
-words (`b==itch.` → `b`, `itch`), 9 IUs, same root cause and fix shape as
-the already-fixed bracket-hyphen case, not yet applied here. Regression
-tests for all three invariants (`tests/test_tokenizer_invariants.py`) now
-run every time, so this and future checks of the same kind can't drift
-unnoticed. Next: fix `_sandwiched()`, re-run every stage-4 check again,
-then the LLM run with `n_samples=5` from the start.
+dropped, 63,636 reference segments; the pending-word bug and the
+doubled-cue/cue-then-bracket fusion bug are both fixed; invariant (d) (no
+wrongful splits) has zero unattributed violations. **Still not marked
+final**: verifying (b)'s categories surfaced a third, real, open bug —
+the single-angle tag regex swallows real content glued to it with no
+space (`reports/phase2_tokeniser.md` §17.1), 19 confirmed-or-candidate
+instances, not fixed. Regression tests for all four invariants plus this
+finding (`tests/test_tokenizer_invariants.py`) run every time, so none of
+this can drift unnoticed. Next: decide how the tokeniser should tell a
+genuine tag name from glued real content, implement it, re-run every
+stage-4 check again, then the LLM run with `n_samples=5` from the start.
 
 ## Sampling
 

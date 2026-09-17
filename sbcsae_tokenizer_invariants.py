@@ -20,6 +20,15 @@ not against its internals):
      not) -- a spot check that real short words (I, OK, TV, ...) are
      never silently dropped and that only tag/vocal-noise/comment names
      are.
+  d) No wrongful splits: (a) catches a word's letters spanning two
+     chunks, (b) catches a chunk's letters going missing from every
+     word -- neither catches a chunk's letters staying put but ending up
+     as two or more separate words instead of one ("b==itch" -> "b",
+     "itch": every letter is accounted for, in order, so (a) and (b) are
+     silent). For every chunk, count how many emitted words its content
+     is spread across; 2+ is a violation unless a documented splitting
+     rule explains it (a Boundary inside the chunk, a displaced-
+     truncation flush).
 
 This is diagnostic only. Per the brief, it fixes nothing -- any violation
 is reported, not corrected here. The category heuristics below (for b)
@@ -97,6 +106,142 @@ def check_no_lost_words(text: str, tok_words: list[str]) -> list[tuple[str, str]
         if not any(required in wl for wl in word_letter_strs):
             violations.append((chunk, required))
     return violations
+
+
+def _letter_positions(chunk: str) -> list[int]:
+    """Index in `chunk` of each of its letters, in order -- lets a
+    position in the letters-only reduction be mapped back to where that
+    letter actually sits in the original, punctuation-and-all string.
+    """
+    return [i for i, ch in enumerate(chunk) if ch.isalpha()]
+
+
+def check_no_wrongful_splits(text: str, tok_words: list[str]) -> list[tuple[str, list[str], list[str]]]:
+    """(d). For every whitespace-delimited chunk, how many emitted words
+    does its content end up spread across? Determined using only the raw
+    text and tok_words (no tokeniser internals): walk chunks and words in
+    parallel, in order. (a) already guarantees a word's letters live
+    within exactly one chunk (never split across whitespace), so each
+    word can be assigned to the first chunk -- scanning left to right,
+    never backtracking, and never reusing already-consumed letters
+    within a chunk -- whose own letters contain it starting at or after
+    the current within-chunk cursor. Both the cross-chunk and
+    within-chunk positions only ever advance, which is what keeps a
+    short, common word (like "a" or "I") from being coincidentally
+    reattributed to an earlier chunk's unrelated letters.
+
+    Returns (chunk_text, assigned_words, gaps) for every chunk assigned 2
+    or more words -- a wrongful split, unless a documented rule explains
+    it (see _split_category). `gaps` is the literal original-text
+    substring between each pair of consecutive assigned words WITHIN the
+    chunk (mapped back from the letters-only cursor via
+    _letter_positions) -- what actually sits between them, not just
+    whatever else happens to be anywhere in the chunk.
+    """
+    chunks = whitespace_chunks(text)
+    chunk_letters = [_letters(c) for _, _, c in chunks]
+    chunk_letter_pos = [_letter_positions(c) for _, _, c in chunks]
+    assigned: list[list[str]] = [[] for _ in chunks]
+    assigned_spans: list[list[tuple[int, int]]] = [[] for _ in chunks]  # (start, end) in the raw chunk text
+
+    chunk_idx = 0
+    cursor = 0
+    for w in tok_words:
+        wl = _letters(w)
+        if not wl:
+            continue
+        while chunk_idx < len(chunks) and chunk_letters[chunk_idx].find(wl, cursor) == -1:
+            chunk_idx += 1
+            cursor = 0
+        if chunk_idx >= len(chunks):
+            break  # shouldn't happen while (a) holds -- nothing left to assign to
+        pos = chunk_letters[chunk_idx].find(wl, cursor)
+        cursor = pos + len(wl)
+        positions = chunk_letter_pos[chunk_idx]
+        raw_start, raw_end = positions[pos], positions[cursor - 1] + 1
+        assigned[chunk_idx].append(w)
+        assigned_spans[chunk_idx].append((raw_start, raw_end))
+
+    violations = []
+    for i in range(len(chunks)):
+        if len(assigned[i]) < 2:
+            continue
+        _start, _end, chunk = chunks[i]
+        spans = assigned_spans[i]
+        gaps = [chunk[spans[k][1] : spans[k + 1][0]] for k in range(len(spans) - 1)]
+        violations.append((chunk, assigned[i], gaps))
+    return violations
+
+
+# --- (d) categorisation, terminal reporting only, decides nothing -------
+# Each checks whether ITS OWN mechanism sits in the gap between the two
+# specific words it's meant to explain -- not just anywhere in the
+# chunk, which is exactly the count-level over-attribution flaw this
+# check exists to avoid repeating at the categorisation level.
+_BOUNDARY_CHAR = re.compile(r"[.,?]|-{2,}")
+_DISPLACED_TRUNC_SHAPE = re.compile(r"[=%]-(?!-)")
+_BARE_UNDERSCORE = re.compile(r"_(?!_)")
+
+
+def _gap_category(gap: str) -> str:
+    if _BOUNDARY_CHAR.search(gap):
+        return "boundary_inside_chunk (documented: . , ? -- always end a word)"
+    if _DISPLACED_TRUNC_SHAPE.search(gap):
+        return "displaced_truncation_flush (documented: =- or %- always ends a word)"
+    if _BARE_UNDERSCORE.search(gap):
+        # SBC012/SBC013's truncation convention (CLAUDE.md, "Tokenisation"
+        # -- "_" as "--"/"-"): a bare, unattached "_" always either
+        # flushes the pending word with a trailing "-" or becomes its own
+        # standalone cue -- either way it never lets fusion continue
+        # through it, the same functional role as a Boundary or a
+        # displaced-truncation hyphen, just not literally either of those
+        # two token kinds.
+        return "underscore_truncation_ends_word (documented: bare _ always ends a word)"
+    return "other"
+
+
+def _split_category(chunk: str, words: list[str], gaps: list[str]) -> str:
+    categories = {_gap_category(gap) for gap in gaps}
+    if len(categories) == 1:
+        return categories.pop()
+    if "other" not in categories:
+        return "multiple_documented_causes (" + " + ".join(sorted(categories)) + ")"
+    return "other"
+
+
+_ANGLE_TAG_MATCH_KINDS = {"angle_open", "angle_close", "angle_wrap", "angle_open_spaced"}
+_ANGLE_TAG_LOWERCASE_NAME = re.compile(r"[a-z]")
+
+
+def angle_tag_names_with_lowercase(text: str) -> list[str]:
+    """Step-3 verification finding (reports/phase2_tokeniser.md S16): a
+    single-angle open/close/wrap match's "name" is matched by the same
+    greedy `[A-Za-z0-9@%]+` class whether it's a genuine short tag code
+    (always all-caps in this corpus, confirmed by exhaustive marker-
+    inventory review) or real spoken content glued directly to the
+    delimiter with no space ("<@Mm@>", "<@in San..."). Every genuine tag
+    code found corpus-wide is all-caps; a lowercase letter anywhere in
+    the matched name is therefore a strong, corpus-verified signal that
+    real content was swallowed, not tag markup. (One further confirmed
+    instance, the indecipherable-syllable marker "XX" itself swallowed
+    by "[XX>]", is all-caps and so not caught by this signal -- reported
+    separately, not folded into this metric.)
+
+    Uses tokeniser internals (_raw_matches/_KIND_OF) directly -- this is
+    a post-hoc diagnostic confirming a hypothesis about the tokeniser's
+    OWN behaviour, not an independent cross-check, so that constraint
+    doesn't apply here the way it does to check (a)-(d) above.
+    """
+    from sbcsae_tokenizer import _KIND_OF, _raw_matches  # local import: diagnostic only
+
+    names = []
+    for m in _raw_matches(text):
+        if m.lastgroup not in _ANGLE_TAG_MATCH_KINDS:
+            continue
+        content = m.group().strip("<>").lstrip("@%").rstrip("@%")
+        if _ANGLE_TAG_LOWERCASE_NAME.search(content):
+            names.append(content)
+    return names
 
 
 def allcaps_chunks(text: str) -> list[str]:
@@ -185,6 +330,8 @@ def main():
     a_violations = []  # (doc_id, line, text, word)
     b_violations = []  # (doc_id, line, text, chunk, required)
     b_by_category = Counter()
+    d_violations = []  # (doc_id, line, text, chunk, words, category)
+    d_by_category = Counter()
     caps_tally = defaultdict(lambda: {"kept": 0, "removed": 0})
 
     for doc_id, units, *_ in iter_trn_documents():
@@ -207,6 +354,11 @@ def main():
                 cat = _category(chunk, required, tok_words)
                 b_violations.append((doc_id, line, text, chunk, required, cat))
                 b_by_category[cat] += 1
+
+            for chunk, words, gaps in check_no_wrongful_splits(text, tok_words):
+                cat = _split_category(chunk, words, gaps)
+                d_violations.append((doc_id, line, text, chunk, words, cat))
+                d_by_category[cat] += 1
 
             raw_caps = Counter(allcaps_chunks(text))
             for value, raw_n in raw_caps.items():
@@ -239,6 +391,19 @@ def main():
         print(f"    [{cat}] {doc_id}:{line}  chunk={chunk!r} required={required!r}")
         print(f"      raw={text!r}")
 
+    print(f"\n--- (d) No wrongful splits: {len(d_violations)} violations ---")
+    print("  by category:")
+    for cat, c in d_by_category.most_common():
+        print(f"    {cat}: {c}")
+    print("\n  10 raw examples per category (terminal only):")
+    shown_d = defaultdict(int)
+    for doc_id, line, text, chunk, words, cat in d_violations:
+        if shown_d[cat] >= 10:
+            continue
+        shown_d[cat] += 1
+        print(f"    [{cat}] {doc_id}:{line}  chunk={chunk!r} words={words!r}")
+        print(f"      raw={text!r}")
+
     print(f"\n--- (c) Capitalised material: {len(caps_tally)} distinct all-caps chunks ---")
     print("  sorted by total occurrences, descending:")
     for value, counts in sorted(caps_tally.items(), key=lambda kv: -(kv[1]["kept"] + kv[1]["removed"]))[:40]:
@@ -262,6 +427,8 @@ def main():
         w.writerow({"check": "a_no_fusion_across_whitespace", "category": "violation", "count": len(a_violations)})
         for cat, c in b_by_category.most_common():
             w.writerow({"check": "b_no_lost_words", "category": cat, "count": c})
+        for cat, c in d_by_category.most_common():
+            w.writerow({"check": "d_no_wrongful_splits", "category": cat, "count": c})
 
     with open(reports_dir / "phase2_tokenizer_capitalised_tally.csv", "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=["value", "kept", "removed"])
@@ -287,6 +454,20 @@ def main():
                     "text": text,
                     "chunk": chunk,
                     "required": required,
+                    "category": cat,
+                }
+            )
+    with open(private_dir / "phase2_tokenizer_invariants_d_full.csv", "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=["file", "line", "text", "chunk", "words", "category"])
+        w.writeheader()
+        for doc_id, line, text, chunk, words, cat in d_violations:
+            w.writerow(
+                {
+                    "file": doc_id,
+                    "line": line,
+                    "text": text,
+                    "chunk": chunk,
+                    "words": words,
                     "category": cat,
                 }
             )

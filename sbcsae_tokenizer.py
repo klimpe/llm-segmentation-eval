@@ -494,6 +494,43 @@ def _glued_frag_follows(matches: list[re.Match], i: int, text: str) -> bool:
     return False
 
 
+def _glued_frag_or_trunc_follows_through_cues(matches: list[re.Match], i: int, text: str) -> bool:
+    """True if, walking forward from matches[i] with no whitespace anywhere
+    along the way, a frag or displaced_trunc match is eventually reached --
+    skipping over any number of intervening "cue"- or "drop"-kind matches,
+    not just zero or one. Two distinct real-corpus shapes need this, both
+    the same one-hop-lookahead root cause as the already-fixed
+    _glued_frag_follows (hyphen case):
+
+    - A RUN of 2+ glued cue marks between two word fragments ("b==itch",
+      confirmed this session): the match right after the FIRST "=" is the
+      SECOND "=" (kind "cue"), not the frag -- checking only one match
+      ahead made every cue but the last in the run look unsandwiched,
+      flushing the word prematurely ("b", "itch" instead of "bitch").
+    - A single cue immediately followed by a glued "drop"-kind delimiter
+      before the frag ("fa=]st?", "do=[ing,", "[2u=2]m,", confirmed this
+      session): checking only one match ahead saw the overlap-bracket
+      delimiter, not "st"/"ing"/"m", and again flushed early ("fa", "st"
+      instead of "fast"). The delimiter is exactly as incidental here as
+      it already is in the plain "drop" fusion case (li[2ke2], -> like);
+      the cue in front of it doesn't change that.
+    """
+    j = i + 1
+    prev_end = matches[i].end()
+    while j < len(matches):
+        nxt = matches[j]
+        if not _is_glued(text, prev_end, nxt.start()):
+            return False
+        kind = _KIND_OF[nxt.lastgroup]
+        if kind in ("frag", "displaced_trunc"):
+            return True
+        if kind not in ("cue", "drop"):
+            return False
+        prev_end = nxt.end()
+        j += 1
+    return False
+
+
 def _sandwiched(matches: list[re.Match], i: int, text: str) -> bool:
     """True if the cue at matches[i] sits directly between two letter runs
     with no whitespace on either side (e.g. the "=" in "s=o"), so it should
@@ -504,18 +541,15 @@ def _sandwiched(matches: list[re.Match], i: int, text: str) -> bool:
     A displaced-truncation hyphen counts as a continuation here too, not
     just an ordinary word fragment: "b=-" must keep "=" open rather than
     ending the word at "b", so the hyphen can still reach it one match
-    later (see _handle_displaced_trunc).
+    later (see _handle_displaced_trunc). And a run of further glued cue
+    marks before that frag/hyphen is itself not a reason to stop looking
+    (see _glued_frag_or_trunc_follows_through_cues).
     """
     if i == 0:
         return False
     if not _is_glued(text, matches[i - 1].end(), matches[i].start()):
         return False
-    if i + 1 >= len(matches):
-        return False
-    nxt = matches[i + 1]
-    if not _is_glued(text, matches[i].end(), nxt.start()):
-        return False
-    return _KIND_OF[nxt.lastgroup] in ("frag", "displaced_trunc")
+    return _glued_frag_or_trunc_follows_through_cues(matches, i, text)
 
 
 def tokenize(text: str) -> list[TokenItem]:
