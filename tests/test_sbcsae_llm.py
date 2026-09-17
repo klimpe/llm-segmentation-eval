@@ -8,8 +8,14 @@ module's grouping logic is caught here without needing the corpus.
 import re
 
 from sbcsae_reader import IntonationUnit
-from sbcsae_tokenizer import Condition, Cue
-from sbcsae_llm import build_document_structure, render_document, render_turn_line, render_window
+from sbcsae_tokenizer import Condition, Cue, Word
+from sbcsae_llm import (
+    GLOSSARY_SYMBOLS,
+    build_document_structure,
+    render_document,
+    render_turn_line,
+    render_window,
+)
 
 
 def iu(speaker, text):
@@ -229,3 +235,84 @@ def test_condition_a_and_b_of_a_window_differ_only_by_cues_after_lowercasing():
     for line in a.split("\n"):
         for word in _rendered_words(line):
             assert word == word.lower()
+
+
+# ---------------------------------------------------------------------
+# Word-internal marks and canonical cue symbols
+# ---------------------------------------------------------------------
+
+
+def test_word_internal_mark_rendered_in_place_in_b_not_in_a():
+    units = [iu("A", "s=o ho=me We=ll")]
+    doc = build_document_structure("TEST", units)
+    a = render_turn_line(doc.turns[0], Condition.A)
+    b = render_turn_line(doc.turns[0], Condition.B)
+    assert a == "A: 1:so 2:home 3:well"
+    assert b == "A: 1:s=o 2:ho=me 3:we=ll"
+    # word identity itself (masses/scoring, case included) is unaffected
+    # by rendering -- lowercasing happens only in _word_piece, not here.
+    words = [it for it in doc.turns[0].items if isinstance(it, Word)]
+    assert [w.text for w in words] == ["so", "home", "Well"]
+    assert [w.raw for w in words] == ["s=o", "ho=me", "We=ll"]
+
+
+def _strip_tier2_marks_from_b_line(line: str) -> str:
+    """The inverse of what condition B adds over condition A: drop every
+    standalone cue token entirely, and remove the three sandwich-able
+    mark characters (=, %, !) from inside a word piece. "-"/"_" inside a
+    word are never stripped -- they are real word identity (a truncated
+    word's own trailing "-", or an underscore-joined compound), not a
+    fused tier-2 mark; only =, %, ! can ever be fused into Word.raw (see
+    sbcsae_tokenizer.py's _sandwiched).
+    """
+    pieces = []
+    for p in line.split(" "):
+        if p in GLOSSARY_SYMBOLS:
+            continue
+        if re.match(r"^\d+:", p):
+            idx, word = p.split(":", 1)
+            pieces.append(f"{idx}:{word.translate(str.maketrans('', '', '=%!'))}")
+        else:
+            pieces.append(p)  # speaker label
+    return " ".join(pieces)
+
+
+def test_stripping_every_tier2_mark_from_b_reproduces_a_exactly():
+    units = [
+        iu("KIRSTEN", "s=o ho=me (H) We=ll (Hx) !Ron said so= .. hi"),
+        iu("DON", "% glottal%stop plain -word trunc_ end"),
+    ]
+    doc = build_document_structure("TEST", units)
+    for t in doc.turns:
+        a = render_turn_line(t, Condition.A)
+        b = render_turn_line(t, Condition.B)
+        assert _strip_tier2_marks_from_b_line(b) == a
+
+
+def test_render_window_word_internal_mark_survives_slicing():
+    units = [iu("A", "one ho=me three")]
+    doc = build_document_structure("TEST", units)
+    rendered = render_window(doc, 1, 3, Condition.B)
+    assert rendered == "A: 1:one 2:ho=me 3:three"
+
+
+def test_canonical_symbol_used_regardless_of_raw_case_variant():
+    # "(hx)"/"(HX)" are documented case-folded variants of "(Hx)"
+    # (CLAUDE.md's Tokenisation section) -- the canonical form must be
+    # rendered regardless of which variant occurred in the source.
+    units = [iu("A", "one (hx) two (HX) three")]
+    doc = build_document_structure("TEST", units)
+    rendered = render_turn_line(doc.turns[0], Condition.B)
+    assert rendered == "A: 1:one (Hx) 2:two (Hx) 3:three"
+    assert "(hx)" not in rendered and "(HX)" not in rendered
+
+
+def test_canonical_symbol_used_for_compound_decomposed_cues():
+    # "(H=)" decomposes into breath_in + lengthening (sbcsae_tokenizer.py's
+    # breath_paren_lengthening compound); the RAW pieces produced are "(H"
+    # and "=)" -- neither is a valid symbol on its own and must not leak.
+    units = [iu("A", "one (H=) two")]
+    doc = build_document_structure("TEST", units)
+    rendered = render_turn_line(doc.turns[0], Condition.B)
+    assert rendered == "A: 1:one (H) = 2:two"
+    assert "(H " not in rendered and "=)" not in rendered

@@ -6,9 +6,15 @@ Builds one whole-document structure from the reader+tokeniser output
 renders it into a prompt under condition A (words only) or B (words +
 tier-2 prosodic cues), following the "candidate 2" format from the
 rendering-sketch session: one line per turn, "SPEAKER: 1:word 2:word",
-cues inline and unindexed in B. A is produced by rendering B and dropping
-every cue -- same line breaks, labels and indexing either way, so any A/B
+cues inline and unindexed in B -- both standalone cues (between words)
+and cues glued mid-word ("ho=me"), which the tokeniser fuses into that
+Word's own .raw rather than emitting as a separate item (see
+_word_piece). A is exactly B with every tier-2 mark removed, wherever it
+sits: same line breaks, labels and indices either way, so any A/B
 difference in what the model does cannot come from a format difference.
+Every rendered cue is its KIND's canonical symbol (CUE_CANONICAL_SYMBOL),
+never the raw matched text, which can vary by case or by which rule
+produced it.
 
 Word indices are global (1-indexed across the whole document, continuous
 across turn and IU boundaries alike), matching the masses contract and
@@ -103,27 +109,99 @@ def build_document_structure(doc_id: str, units) -> DocumentStructure:
 # ---------------------------------------------------------------------
 
 
-def _word_piece(idx: int, word: Word) -> str:
-    """"i:word", word lowercased for rendering only. Word.text itself
-    (the masses/scoring identity) is untouched -- see the lowercasing
-    section of reports/phase2_llm_design.md: capitalisation was found to
-    leak the same boundary signal CLAUDE.md already strips via Boundary
-    items (94% capitalised after '.', 86% turn-initial, vs. 4%
-    IU-internal), so every rendered word is lowercased uniformly
+def _word_piece(idx: int, word: Word, condition: Condition) -> str:
+    """"i:word", lowercased for rendering only. Word.text itself (the
+    masses/scoring identity) is untouched either way -- see the
+    lowercasing section of reports/phase2_llm_design.md: capitalisation
+    was found to leak the same boundary signal CLAUDE.md already strips
+    via Boundary items (94% capitalised after '.', 86% turn-initial, vs.
+    4% IU-internal), so every rendered word is lowercased uniformly
     (including "I"), never positionally -- a positional rule would just
     re-encode the same signal a different way.
+
+    Condition A renders word.text (bare, marks stripped: "home").
+    Condition B renders word.raw, which is the same string EXCEPT for a
+    tier-2 mark glued on both sides ("ho=me") -- the tokeniser fuses such
+    a mark into the word's own .raw rather than emitting a separate Cue
+    item (sbcsae_tokenizer.py's `_sandwiched` mechanism), so a word-only
+    render (word.text, the pre-fix behaviour) silently dropped it: it was
+    neither in .text nor a standalone Cue. See
+    reports/phase2_word_internal_marks.csv -- 44% of all lengthening ("=")
+    occurrences are exactly this case. A mark glued on only one side
+    (word-final "so=", or leading with nothing open, "!Ron") is NOT
+    sandwiched -- it was already its own Cue item and is unaffected by
+    this choice of word.text vs .raw.
     """
-    return f"{idx}:{word.text.lower()}"
+    text = word.raw if condition is Condition.B else word.text
+    return f"{idx}:{text.lower()}"
+
+
+# A Cue's own .raw is whatever substring actually matched -- for a plain
+# rule that's always the same literal (lengthening's "=", glottal's "%"),
+# but for breath_in/breath_out it varies by case ("(H)"/"(h)"/"(HX)") and,
+# for a Cue produced by decomposing a "compound" rule match (see
+# tokenize()'s "compound" handling), by which compound produced it: a
+# whole-corpus check found breath_in raw as "(H)" (10,046x), but also
+# "(H" (12x, breath_paren_lengthening), "(H[" (1x, breath_bracket_
+# lengthening) and "(H]" (1x, the sbc015 named exception) -- none of
+# those three are valid on their own. Rendering .raw directly would leak
+# a malformed fragment into the prompt. Render the canonical symbol for
+# the Cue's KIND instead, always -- every occurrence of one kind means
+# the same thing regardless of which rule or case variant produced it.
+CUE_CANONICAL_SYMBOL = {
+    "pause_short": "..",
+    "pause_long": "...",
+    "breath_in": "(H)",
+    "breath_out": "(Hx)",
+    "lengthening": "=",
+    "glottal": "%",
+    "booster_bang": "!",
+    # Both confirmed present corpus-wide (20 and 17 occurrences): a
+    # truncation mark with nothing to attach to, so it surfaces as its
+    # own standalone token rather than a word's trailing "-" -- see
+    # sbcsae_tokenizer.py's _handle_displaced_trunc case 2 and the
+    # underscore_trunc "%_you" case in CLAUDE.md's Tokenisation section.
+    "displaced_truncation": "-",
+    "underscore_truncation": "_",
+    # Confirmed zero occurrences corpus-wide (CLAUDE.md's "Documented Du
+    # Bois marks confirmed absent"), included so rendering never guesses
+    # if one ever appears -- it renders the correct canonical symbol
+    # immediately, the same way the tokeniser itself still carries a live
+    # rule for each of these rather than deleting it.
+    "latching": "(0)",
+    "accent_caret": "^",
+    "accent_backtick": "`",
+    "booster_semi": ";",
+    "pitch_backslash": "\\",
+    # "pause_timed" ("...(N)") is deliberately NOT here: its matched text
+    # is parametrised by N, so there is no single fixed canonical string.
+    # Also confirmed zero occurrences -- if one ever appears, the lookup
+    # below raises rather than rendering a guess.
+}
+
+
+def _cue_piece(cue: Cue) -> str:
+    try:
+        return CUE_CANONICAL_SYMBOL[cue.kind]
+    except KeyError:
+        raise KeyError(
+            f"no canonical rendering symbol for cue kind {cue.kind!r} (raw={cue.raw!r}) -- "
+            f"add one to CUE_CANONICAL_SYMBOL rather than falling back to .raw"
+        ) from None
 
 
 def render_turn_line(turn: Turn, condition: Condition, start_override: int | None = None) -> str:
     """Render one turn as "SPEAKER: i:word i:word ..." (condition A), or
-    the same with tier-2 cues inserted inline, unindexed, at their
-    original position (condition B). A is exactly B with every Cue
-    dropped -- same pieces list, same join, same indices -- so the A/B
-    difference in a prompt can only ever be the presence of cues, never
-    line breaks, labels, or indexing. Rendered words are lowercased
-    (see _word_piece); the speaker label and cue symbols are not.
+    the same with tier-2 cues inserted -- both standalone (unindexed, at
+    their original position) and embedded mid-word -- in condition B. A
+    is exactly B with every tier-2 mark removed: every standalone Cue
+    item dropped, AND every word rendered as its bare .text instead of
+    its (possibly mark-carrying) .raw -- same line breaks, labels and
+    indices either way, so an A/B difference in a real run cannot come
+    from format. See _word_piece and _cue_piece for where each mark ends
+    up; both render the CANONICAL symbol for a cue's kind, never the raw
+    matched text, which can vary by case or by which compound rule
+    produced it (see CUE_CANONICAL_SYMBOL).
 
     start_override lets a caller (the windowing code) renumber a turn
     that is only partially inside a window; by default the turn's own
@@ -133,10 +211,10 @@ def render_turn_line(turn: Turn, condition: Condition, start_override: int | Non
     pieces = []
     for it in turn.items:
         if isinstance(it, Word):
-            pieces.append(_word_piece(idx, it))
+            pieces.append(_word_piece(idx, it, condition))
             idx += 1
         elif isinstance(it, Cue) and condition is Condition.B:
-            pieces.append(it.raw)
+            pieces.append(_cue_piece(it))
         # Cue dropped under condition A; Boundary items are never rendered
         # under either condition (sbcsae_tokenizer.Boundary docstring).
     return f"{turn.speaker}: " + " ".join(pieces)
@@ -180,7 +258,7 @@ def _slice_turn_items(turn: Turn, lo: int, hi: int) -> list[TokenItem]:
 
 
 _IU_DEFINITION = """\
-You will read a transcript of spontaneous, multi-party spoken conversation. \
+You will read a transcript of spontaneous spoken discourse. \
 The transcript is given as a sequence of words, one speaker turn per line, \
 in the format "SPEAKER: 1:word 2:word ...", where each number is a word's \
 1-indexed position in the document.
@@ -201,24 +279,38 @@ new intonation unit begins inside a turn, e.g. [4, 9, 15]. No other \
 text, no markdown fences.
 """
 
-# Only the tier-2 cues actually confirmed present anywhere in this corpus
-# (CLAUDE.md's "Tokenisation" section; accent caret/backtick, the
-# semicolon booster, latching "(0)", and the timed-pause form are
-# documented rules but confirmed to occur zero times corpus-wide, so they
-# are not glossed here -- a symbol that never appears needs no glossary
-# entry). No claim about what any of these mean FOR segmentation --
-# purely what each one denotes.
-_CUE_GLOSSARY = """\
-Some words are also marked with symbols showing how they were spoken. \
-These symbols are not words and are never a valid answer:
-  ...   a long pause
-  ..    a short pause
-  (H)   an in-breath
-  (Hx)  an out-breath
-  =     lengthening of the preceding sound
-  %     a glottal stop
-  !     emphatic stress ("booster")
-"""
+# Every cue kind CUE_CANONICAL_SYMBOL can actually render on real corpus
+# data is glossed here (verified whole-corpus, tests/
+# test_cue_glossary_coverage.py): accent caret/backtick, the semicolon
+# booster, latching "(0)", and the timed-pause form are documented rules
+# but confirmed to occur zero times corpus-wide, so they are not glossed
+# -- a symbol that never appears needs no glossary entry (if one ever did
+# appear, the whole-corpus test would catch the gap immediately). No
+# claim about what any of these mean FOR segmentation -- purely what each
+# one denotes. A single structured list, not a hand-kept parallel text
+# block, so the printed glossary and GLOSSARY_SYMBOLS (what the
+# whole-corpus coverage test checks against) cannot drift apart.
+_GLOSSARY_ENTRIES = [
+    ("...", "a long pause"),
+    ("..", "a short pause"),
+    ("(H)", "an in-breath"),
+    ("(Hx)", "an out-breath"),
+    ("=", "lengthening of the preceding sound"),
+    ("%", "a glottal stop"),
+    ("!", 'emphatic stress ("booster")'),
+    ("-", "a truncation mark with no word attached"),
+    ("_", "a truncation mark with no word attached (alternate written form)"),
+]
+
+GLOSSARY_SYMBOLS = frozenset(symbol for symbol, _ in _GLOSSARY_ENTRIES)
+
+_CUE_GLOSSARY = (
+    "Some words are also marked with symbols showing how they were spoken, or "
+    "appear as their own symbol with no word attached. These symbols are not "
+    "words and are never a valid answer:\n"
+    + "\n".join(f"  {symbol:<5s} {desc}" for symbol, desc in _GLOSSARY_ENTRIES)
+    + "\n"
+)
 
 
 def build_prompt(window_text: str, condition: Condition) -> str:
@@ -268,9 +360,9 @@ def render_window(doc: DocumentStructure, window_start: int, window_end: int, co
         pieces = []
         for it in sliced:
             if isinstance(it, Word):
-                pieces.append(_word_piece(idx, it))
+                pieces.append(_word_piece(idx, it, condition))
                 idx += 1
             elif isinstance(it, Cue) and condition is Condition.B:
-                pieces.append(it.raw)
+                pieces.append(_cue_piece(it))
         lines.append(f"{t.speaker}: " + " ".join(pieces))
     return "\n".join(lines)

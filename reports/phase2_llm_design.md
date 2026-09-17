@@ -117,3 +117,124 @@ reporting, 11 triggers a human reading one specific draw.
 
 Tests: `tests/test_degenerate_threshold.py` covers both thresholds and
 the boundary cases between them (11, 15, 22, 23).
+
+## 4. Word-internal marks in condition B
+
+**Finding.** A tier-2 mark glued on BOTH sides to real word content
+(`s=o`) is fused by the tokeniser into that `Word`'s own `.raw` field
+rather than emitted as a separate `Cue` item (`sbcsae_tokenizer.py`'s
+`_sandwiched` mechanism) — but condition B's rendering used `Word.text`
+(the bare, mark-stripped form) for every word, so a sandwiched mark was
+never emitted anywhere: not in `.text`, and not as a `Cue` either. A mark
+glued on only one side (word-final `so=`, or leading with nothing open,
+`!Ron`) is NOT sandwiched and was already rendering correctly as its own
+token.
+
+Whole-corpus count (`sbcsae_word_internal_marks.py`, classification via
+the tokeniser's own `_sandwiched`/`_is_glued`, not an approximation):
+
+| symbol | word-internal (vanished) | word-final | standalone | total | vanish share |
+|---|---:|---:|---:|---:|---:|
+| `=` (lengthening) | 4,235 | 5,303 | 2 | 9,540 | **0.444** |
+| `%` (glottal stop) | 77 | 177 | 1,306 | 1,560 | 0.049 |
+| `!` (booster) | 45 | 0 | 333 | 378 | 0.119 |
+
+**44% of every lengthening mark in the corpus — its single most common
+tier-2 cue by far — was silently invisible in condition B.** A handful of
+additional `%`/`=` occurrences (98 and 18 respectively) come from
+compound rules (`(%Hx)`, `(H=)`, etc.) that always decompose into their
+own separate `Cue` item regardless and were never affected.
+
+**Decision.** `sbcsae_llm.py`'s `_word_piece` now renders `Word.raw` in
+condition B (`12:ho=me`) and `Word.text` in condition A (`12:home`) —
+word identity, count and the masses contract are untouched either way,
+only which string reaches the prompt. Tests: a word-internal mark
+appears in B and not A; a general "strip every tier-2 mark from a B line
+reproduces the A line exactly" property test (`=`, `%`, `!` removed from
+inside word pieces; whole standalone-cue tokens dropped; `-`/`_` inside a
+word are never touched, since they are real word identity — a truncated
+word's own trailing `-`, or an underscore-joined compound — never a
+fused mark).
+
+## 5. Canonical cue symbols
+
+**Finding.** Rendering a `Cue` used `.raw`, the exact matched substring
+— fine for a plain rule (`lengthening` is always `=`), but `breath_in`
+and `breath_out` vary by case (`(h)`, `(HX)` alongside `(H)`, `(Hx)`) and,
+for a `Cue` produced by decomposing a "compound" rule match, by which
+compound produced it: whole-corpus count found `breath_in` raw as `(H)`
+10,046 times but also `(H` (12, from the `breath_paren_lengthening`
+compound), `(H[` (1) and `(H]` (1) — none valid symbols on their own, and
+none in the glossary. Rendering `.raw` directly would have leaked a
+malformed fragment into the prompt.
+
+**Decision.** Render the canonical symbol for a cue's *kind*
+(`CUE_CANONICAL_SYMBOL`), never `.raw`. Two kinds confirmed present that
+were not previously glossed — `displaced_truncation` (`-`, 17
+occurrences: a truncation mark with nothing to attach to) and
+`underscore_truncation` (`_`, 20 occurrences: the same thing in
+SBC012/SBC013's own written form) — were added to the glossary so the
+symbol-canonicalisation and glossary-completeness properties both hold
+together, not just in the common cases.
+
+**Test:** `tests/test_cue_glossary_coverage.py` renders every 800-word
+window of every file (59, `SBC037` excluded) under condition B and
+checks every symbol — standalone or embedded — is one of
+`GLOSSARY_SYMBOLS`. This is a whole-corpus regression, not a spot check.
+
+**Found along the way, not asked for, not fixed here: a reader defect.**
+4 of 59 files (`SBC027`, `SBC055`, `SBC059`, `SBC060`) have a raw `.trn`
+line with two tabs immediately after the timestamps and nothing between
+them. `sbcsae_reader._HEAD_RE`'s `rest` group is captured after a greedy
+`\s*`, which swallows both tabs as one gap, so `split_line_fields`'s
+"content before the first remaining tab is the speaker" rule (needed for
+real colon-less codes like `MONTOYA`) wrongly takes the actual IU text as
+the speaker and leaves the text field empty — corrupting that IU's
+speaker, and, since an empty `speaker_field` does not update
+`current_speaker`, every following same-run IU until the next
+well-formed speaker field too. 9 IUs directly affected across the 4
+files (some number more indirectly, not yet quantified). Excluded from
+`test_cue_glossary_coverage.py` by name, with the investigation recorded
+in the test's own comment, rather than silently skipped. Two
+superficially similar cases — `SBC052`'s `~Janine` and `SBC056`'s
+`@@@2]` — are NOT this bug: both are pre-existing, already-documented
+real speaker-field content and were left untouched.
+
+CLAUDE.md marks the reader "settled... do not revisit without new
+evidence" — this is that evidence, but fixing `sbcsae_reader.py` is out
+of scope for this session (not one of the steps asked for, and it would
+touch every downstream figure that depends on speaker assignment, e.g.
+the per-file speaker-change counts in
+`reports/phase2_per_file_stats.csv`). The pilot (step 4, next) uses only
+`SBC039`, which is not one of the 4 affected files, so this does not
+block it. Flagged here for a decision before phase 2 scales past the
+pilot, not silently patched or silently ignored.
+
+## 6. Prompt wording: no claim untrue of any file
+
+**Finding.** The task description called the source "multi-party spoken
+conversation" — false for `SBC025`, which has 0 speaker changes
+(`reports/phase2_per_file_stats.csv`): a monologue, not a conversation.
+
+**Decision.** Replaced with "spontaneous spoken discourse", true
+regardless of how many speakers a given file has. "One speaker turn per
+line" is unaffected — still literally true even for a file that turns
+out to be one turn from start to end.
+
+## 7. Pilot run configuration
+
+Same model and call settings as phase 1 (`llm_segmenter.py`,
+`reports/phase1_report.md` §2): model `claude-sonnet-5`, `max_tokens=8192`,
+extended thinking disabled (a phase 1 finding: left on its default, some
+responses burned the whole `max_tokens` budget on thinking and returned
+zero text), no `temperature`/`top_p`/`top_k` (unsupported by this SDK —
+sampling variance is addressed by resampling, not pinning, per CLAUDE.md's
+"Sampling" section). Zero-shot only, per phase 1's own standing
+conclusion for phase 2 (`reports/phase1_report.md`: "Standing
+configuration for phase 2: Zero-shot, not few-shot").
+
+Pilot scope: `SBC039`, 8 windows (800-word window / 600-word scored
+core / 100-word margin, `sbcsae_windows.py`) x condition {A, B} x
+`n_samples=5`. Raw output persisted per (condition, window, sample) under
+the gitignored `llm_output_sbcsae/` (real transcript-derived content, per
+the licence). See `reports/phase2_pilot.md` for the run itself.

@@ -73,6 +73,11 @@ ALLOWED_COLUMNS = {
     "reports/phase2_truncation_position.csv": {
         "category", "n_truncated", "share_of_truncated", "n_all_words", "truncation_rate",
     },
+    "reports/phase2_word_internal_marks.csv": {
+        "symbol", "word_internal", "word_final", "standalone",
+        "total_plain_rule_occurrences", "vanish_share_under_old_rendering",
+        "raw_char_count_any_context", "compound_or_other_occurrences",
+    },
     "results/eng.rst.gum_dev_excluded.csv": {"doc_id", "masked_fraction", "reason"},
     "results/eng.rst.gum_dev_failures.csv": {"doc_id", "reason"},
     "results/eng.rst.gum_dev_masking.csv": {"doc_id", "n_tokens", "masked_fraction"},
