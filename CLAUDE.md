@@ -317,21 +317,23 @@ flush (`=-`/`%-`), or SBC012/SBC013's bare-`_` truncation convention
 (documented above under "Tokenisation") — none outside a documented
 rule.
 
-**Verifying (b)'s "delimiters, never letters" categories found a third,
-new, still-open bug.** `overlap_bracket`, `disguise_prefix`,
-`at_sign_fusion`, and `underscore_truncation_or_gloss` all check out
-clean. But the single-angle tag regexes (`angle_open`/`angle_close`/
-`angle_wrap`) match the delimiter *and* the tag name as one greedy
-token, with no way to tell a short arbitrary tag code from real speech
-glued directly to the delimiter with no space — confirmed by an
-exhaustive scan: every genuine tag code in this corpus is all-caps, and
-**19 instances** have a lowercase letter in the matched name (`<@Mm@>`
-swallows the filler "Mm"; `<@in San...` swallows the preposition "in";
-`Go]=dX>.` swallows the `d` that completes "God"; 16 more of the same
-shape). **Confirmed, not fixed** (`reports/phase2_tokeniser.md` §17.1) —
-deciding how to tell a tag name from glued real content is a real design
-question, out of scope for a verification step. Stage 4 is still not
-final; see "Where phase 2 stands" below.
+**Verifying (b)'s "delimiters, never letters" categories found a third
+bug, since fixed.** `overlap_bracket`, `disguise_prefix`,
+`at_sign_fusion`, and `underscore_truncation_or_gloss` all checked out
+clean. The single-angle tag regexes (`angle_open`/`angle_close`/
+`angle_wrap`) matched the delimiter *and* the tag name as one greedy
+token — any letters at all counted as a valid tag name, so real speech
+glued directly to the delimiter with no space (`<@Mm@>`, `<@in San...`,
+`Go]=dX>.`) was silently swallowed, 19 confirmed instances. **Fixed**
+(`reports/phase2_tokeniser.md` §19): the tag-name pattern is now a
+**closed inventory of 36 codes**, built from every code confirmed to
+occur in an unambiguous position (an opener followed by whitespace, a
+closer preceded by whitespace) corpus-wide — every one already a
+recognised Du Bois quality/event code, none excluded as spurious. Double-
+angle (`<<TAG ... TAG>>`) was checked the same way and found to swallow
+nothing — no fix needed there. All 19 pinned instances plus 2 more found
+during the fix (`<@SM ... SM@>`, `VOXX>`) verified directly, before and
+after.
 
 ### No genre breakdown
 
@@ -342,19 +344,25 @@ enable. Break results down by document and by document length instead.
 
 ### Where phase 2 stands
 
-Stages 1–3 complete: reading, line structure, `&` merge. Stage 4
-(tokeniser): 0 raises over 68,815 IUs (excl. SBC037), 5,179 zero-word IUs
-dropped, 63,636 reference segments; the pending-word bug and the
-doubled-cue/cue-then-bracket fusion bug are both fixed; invariant (d) (no
-wrongful splits) has zero unattributed violations. **Still not marked
-final**: verifying (b)'s categories surfaced a third, real, open bug —
-the single-angle tag regex swallows real content glued to it with no
-space (`reports/phase2_tokeniser.md` §17.1), 19 confirmed-or-candidate
-instances, not fixed. Regression tests for all four invariants plus this
-finding (`tests/test_tokenizer_invariants.py`) run every time, so none of
-this can drift unnoticed. Next: decide how the tokeniser should tell a
-genuine tag name from glued real content, implement it, re-run every
-stage-4 check again, then the LLM run with `n_samples=5` from the start.
+Stages 1–4 complete. Stage 4 (tokeniser) is **final**
+(`reports/phase2_tokeniser.md` §19.7): 0 raises over 68,815 IUs (excl.
+SBC037), 5,172 zero-word IUs dropped, 63,643 reference segments; the
+pending-word bug, the doubled-cue/cue-then-bracket fusion bug, and the
+angle-tag content-swallowing bug are all fixed; invariants (a) and (d)
+have zero violations, (b) is individually verified category by category
+with zero violations outside a documented rule, and (c)'s spot check
+holds. Regression tests for all four invariants (`tests/
+test_tokenizer_invariants.py`) run every time, so a future regression in
+any of this fails loudly rather than drifting unnoticed.
+
+**Next: design the LLM segmentation run.** Prompt, one document first per
+the standing working method (representation → one reader, one file →
+metrics validated → LLM on one document → scale), `n_samples=5` from the
+start per the standing sampling policy, degenerate-output detection
+wired in before any real run. Phase 2's target is prosodic (intonation-
+unit) segmentation, not discourse — every table and claim involving
+phase 2 figures must say so wherever the numbers appear, per this
+document's own phase 2 framing above.
 
 ## Sampling
 

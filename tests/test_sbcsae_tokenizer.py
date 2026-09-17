@@ -714,6 +714,73 @@ def test_angle_close_bare_missing_name():
     assert [w.text for w in words_only(items)] == ["Ugh", "VOX"]
 
 
+def test_angle_tag_closed_inventory_does_not_swallow_glued_content():
+    # Bug fixed this session (reports/phase2_tokeniser.md S19): the old
+    # "<[A-Za-z0-9@%]+" pattern accepted ANY letters as a tag name, so
+    # real content glued to the delimiter with no space was silently
+    # swallowed as if it were the tag's own name. SBC005, real corpus:
+    # "Mm" (a filler) used to vanish entirely.
+    items = tokenize("[@@ <@Mm@>].")
+    assert [w.text for w in words_only(items)] == ["Mm"]
+
+
+def test_angle_tag_closed_inventory_still_drops_genuine_codes():
+    # The fix must not turn into "never drop anything" -- a real,
+    # confirmed code (VOX) is still recognised and dropped.
+    items = tokenize("<VOX hello VOX>.")
+    assert [w.text for w in words_only(items)] == ["hello"]
+
+
+def test_angle_tag_close_code_fuses_through_the_guard():
+    # SBC029, real corpus: "knowX>" -- without the "word" rule's own
+    # guard against extending into a recognised close code, this would
+    # swallow "know" together with the "X" delimiter as one bogus word.
+    items = tokenize("[<X You knowX>].")
+    assert [w.text for w in words_only(items)] == ["You", "know"]
+
+
+def test_angle_tag_open_close_glued_letters_fuse_across_delimiter():
+    # SBC008, real corpus: "Go]=dX>." -- the "d" that completes "God" is
+    # glued directly before the "X>" close code; must still fuse with
+    # "Go" the same way it would across any other dropped delimiter.
+    items = tokenize("[<X Go]=dX>.")
+    assert [w.text for w in words_only(items)] == ["God"]
+
+
+def test_angle_tag_unrecognised_open_is_a_stray_not_a_swallow():
+    # SBC023, real corpus: "<or ..." -- "or" is not a code, so "<" is a
+    # stray delimiter artifact, stripped; "or" survives as an ordinary
+    # word rather than being swallowed as an ad hoc tag name.
+    items = tokenize("<or did it have a knobby end,")
+    assert [w.text for w in words_only(items)] == ["or", "did", "it", "have", "a", "knobby", "end"]
+
+
+def test_angle_tag_case_sensitive_no_fuzzy_match():
+    # SBC033, real corpus: "<Hi ... HI>" -- "Hi" (mixed case) does not
+    # match the confirmed code "HI" (uppercase); "<" is a stray, "Hi"
+    # becomes an ordinary word. Not a guess at what the transcriber
+    # meant -- the closing "HI>" (exact case) is still recognised and
+    # dropped as the real code.
+    items = tokenize("<Hi Whoa= HI>,")
+    assert [w.text for w in words_only(items)] == ["Hi", "Whoa"]
+
+
+def test_angle_tag_compound_at_sm_named_exception():
+    # SBC001, real corpus: "<@SM ... SM@>" -- "@" and "SM" stacked with
+    # no space, at both open and close, a compound of two quality
+    # markers rather than "@" plus the real word "SM".
+    items = tokenize("<@SM hello there SM@>.")
+    assert [w.text for w in words_only(items)] == ["hello", "there"]
+
+
+def test_angle_tag_voxx_named_exception_no_spurious_word():
+    # SBC058, real corpus: "VOXX>" -- without the named exception, the
+    # "word" rule's guard only stops before "X>", not before "VOX"
+    # itself, so "VOX" would leak through as a bogus real word.
+    items = tokenize("[<VOX XX] X= VOXX>.")
+    assert "VOX" not in [w.text for w in words_only(items)]
+
+
 def test_double_angle_open_only_no_close_in_iu():
     # A tag opened here and closed in a later IU: no pairing required, no
     # raise just because this IU's close isn't visible.

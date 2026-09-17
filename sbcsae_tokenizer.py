@@ -98,6 +98,32 @@ class Boundary:
 
 TokenItem = Word | Cue | Boundary
 
+# Single-angle tag codes: a CLOSED inventory, not "any letters" (reports/
+# phase2_tokeniser.md S19). Built from every code found in an unambiguous
+# position corpus-wide -- an opening delimiter followed by whitespace, a
+# closing one preceded by whitespace -- keeping only those confirmed as
+# BOTH an opener and a closer somewhere (genuine paired usage, not a
+# one-off scanning artifact). Sorted longest first: since every code is a
+# distinct literal string, at most one can ever match at a given
+# position (a shorter code's own match requires the character right
+# after it to be non-alphanumeric, which a longer code sharing that
+# prefix never satisfies) -- verified corpus-wide, not just reasoned
+# through, so "if more than one code could match, raise" never actually
+# arises for this inventory.
+_ANGLE_TAG_CODES = (
+    "NONSENSE", "DRINKING", "HUMMING", "SMOKING", "ACCENT", "SHOUT",
+    "FOOD", "SING", "READ", "YELL", "SIGH", "SLUR", "VOX", "MRC", "PAR",
+    "YWN", "CRK", "CRY", "ACC", "WH", "HI", "BR", "FF", "PP", "WI", "L2",
+    "SM", "X", "P", "Q", "F", "L", "A", "W", "@", "%",
+)
+_ANGLE_TAG_ALTERNATION = "|".join(re.escape(c) for c in _ANGLE_TAG_CODES)
+# Stops a "word" frag match from extending into a recognised close-code
+# immediately ahead of it ("knowX>", "XXP>": without this, frag's own
+# greedy letter class has no way to know "X>"/"P>" belongs to the
+# delimiter, not the word, and swallows straight through it -- see the
+# "word" rule below).
+_ANGLE_TAG_CLOSE_GUARD = rf"(?!(?:{_ANGLE_TAG_ALTERNATION})>)"
+
 # --- rule table, in priority order --------------------------------------
 # (kind, name, pattern). kind is one of:
 #   "drop"     -- tier 1, consumed, no token, can still fuse a word cluster
@@ -246,28 +272,54 @@ _RULES: list[tuple[str, str, str]] = [
     ("drop", "double_angle_wrap", r"<<[A-Za-z][A-Za-z_\-]*>>"),
     ("drop", "double_angle_open", r"<<[A-Za-z][A-Za-z_\-]*"),
     ("drop", "double_angle_close", r"[A-Za-z][A-Za-z_\-]*>>"),
-    # Zero-content single-angle case (confirmed this session, same
-    # mechanism as double_angle_wrap above: a greedy open-pattern tried
-    # alone would consume the tag-name letters the close-pattern then has
-    # nothing left to match, raising on the bare ">"). Tried first.
-    ("drop", "angle_wrap", r"<[A-Za-z0-9@%]+>"),
-    # "%" included so <% ... %> (a span-tag pair like <@ ... @>, S3.3: pairs
-    # within the same IU at the same ~70% rate as <@...@>) strips the same
-    # way, not just the letter/digit/@-named tags.
-    ("drop", "angle_open", r"<[A-Za-z0-9@%]+"),
-    # A space between "<" and the tag name (confirmed this session,
-    # SBC043: "< HI any nights HI>") -- the mirror-image malformation of
-    # angle_close_bare_missing_name below (there, the space sits before
-    # ">"; here, after "<"). Same "no pairing" treatment: stripped on
-    # sight, name and delimiter together, not verified against a close.
-    ("drop", "angle_open_spaced", r"<\s+[A-Za-z0-9@%]+"),
-    ("drop", "angle_close", r"[A-Za-z0-9@%]+>"),
-    # A close missing its repeated tag name before ">" (confirmed this
-    # session: "<VOX Ugh VOX >.", "[<X Yeah >]." -- the transcriber didn't
-    # repeat the name at all, just closed with a bare ">" after a space).
-    # Same "no pairing" treatment as every other angle-tag delimiter here:
-    # stripped on sight, not verified against any particular open tag.
-    ("drop", "angle_close_bare_missing_name", r"(?<=\s)>"),
+    # SBC001, "<@SM ... SM@>": "@" and "SM" stacked with no space between
+    # them, at both open and close -- two quality markers combined into
+    # one compound delimiter (a shorthand for the fully-nested
+    # "<@<SM ... SM>@>" form), not "@" plus the real word "SM". Anchored
+    # to this exact, single, consistent pairing. Tried BEFORE the general
+    # code rules below: "@" alone is also a valid code, and being shorter
+    # it would otherwise win first, stranding "SM" to leak through as a
+    # bogus real word.
+    ("drop", "at_sm_open_named_exception", r"<@SM(?=\s)"),
+    ("drop", "at_sm_close_named_exception", r"(?<=\s)SM@(?=>)"),
+    # Single-angle tag codes, closed-inventory version (reports/
+    # phase2_tokeniser.md S19, replacing the old "any letters" pattern
+    # that swallowed real content glued to the delimiter with no space --
+    # 19 confirmed instances, "<@Mm@>", "<@in San...", "Go]=dX>." among
+    # them). Tried in this order: the zero-content wrap ("<VOX>", same
+    # "match the whole thing first" reasoning as double_angle_wrap, so a
+    # greedy open doesn't strand the close with nothing left to match);
+    # then open, open-with-a-stray-space, and close.
+    ("drop", "angle_wrap_code", rf"<(?:{_ANGLE_TAG_ALTERNATION})>"),
+    ("drop", "angle_open_code", rf"<(?:{_ANGLE_TAG_ALTERNATION})"),
+    # A space between "<" and the code (confirmed a prior session, SBC043:
+    # "< HI any nights HI>") -- same "no pairing" treatment: stripped on
+    # sight, not verified against a close.
+    ("drop", "angle_open_spaced_code", rf"<\s+(?:{_ANGLE_TAG_ALTERNATION})"),
+    ("drop", "angle_close_code", rf"(?:{_ANGLE_TAG_ALTERNATION})>"),
+    # SBC058, "VOXX>": the closing "VOX" (repeating the "<VOX" opener) is
+    # immediately followed by a third indecipherable-syllable "X" with no
+    # space, then ">". Without this, the guarded "word" rule below would
+    # match "VOX" alone as a bogus real word (its own guard only stops it
+    # before "X>", not before "VOX" itself). Dropping "VOX" here prevents
+    # that regression; the trailing "X>" is then claimed by
+    # angle_close_code as an ordinary close, same as the pre-fix
+    # behaviour -- this one trailing indecipherable-syllable "X" is not
+    # additionally recovered as content (two others, "XX" and "X",
+    # already survive earlier in the same IU), an accepted limitation of
+    # this single, anchored exception, not pursued further.
+    ("drop", "voxx_named_exception", r"VOX(?=X>)"),
+    # A stray "<" or ">" that doesn't open/close a recognised code: the
+    # delimiter character itself is a transcription artifact here (like a
+    # NUL byte or the lost-initial-letter "0"), stripped and never
+    # reconstructed -- whatever real content sits next to it (SBC016
+    # "<0r", SBC023 "<or", SBC025 "<ot", SBC033 "<Hi") survives untouched
+    # via the ordinary word rule below. Reached only after every
+    # code-anchored rule above has had first claim, so a genuine code is
+    # never mistaken for a stray. Confirmed corpus-wide (S17.1/S19): "<"
+    # and ">" are never real content in this corpus.
+    ("drop", "angle_stray_open", r"<"),
+    ("drop", "angle_stray_close", r">"),
     # SBC056 line 1169, "(@Hx)": the fifth and last of the 5 named
     # exceptions closing out the tokeniser raises. Laughter "@" landed
     # inside an otherwise-ordinary breath_out annotation, with no
@@ -426,7 +478,14 @@ _RULES: list[tuple[str, str, str]] = [
     # "that]'s" (a numbered-overlap bracket closing mid-word): the
     # fragment "'s" only ever fuses onto an already-open word (tokenize()'s
     # fusion logic), never starts one on its own in real data.
-    ("frag", "word", r"'?[^\W\d_]+(?:['_-][^\W\d_]+)*(?:-(?!-)|')?"),
+    #
+    # Each letter is guarded (_ANGLE_TAG_CLOSE_GUARD) against extending
+    # into a recognised angle-tag close code immediately ahead ("knowX>",
+    # "XXP>", S19): without it, this rule's own greedy letter class has no
+    # way to know where real content ends and "X>"/"P>" begins, and
+    # swallows straight through -- "knowX" as one bogus word instead of
+    # "know" (kept) + the close code (dropped).
+    ("frag", "word", rf"'?(?:{_ANGLE_TAG_CLOSE_GUARD}[^\W\d_])+(?:['_-](?:{_ANGLE_TAG_CLOSE_GUARD}[^\W\d_])+)*(?:-(?!-)|')?"),
 ]
 
 _KIND_OF = {name: kind for kind, name, _ in _RULES}

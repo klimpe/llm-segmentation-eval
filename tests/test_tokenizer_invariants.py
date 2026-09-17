@@ -1,7 +1,7 @@
-"""Phase 2 stage 4, closing step 2/3: word-level invariants, run every time.
+"""Phase 2 stage 4, closing steps 2/3: word-level invariants, run every time.
 
 Promoted from the one-off sbcsae_tokenizer_invariants.py analysis (see
-reports/phase2_tokeniser.md S14-S16) into permanent regression tests, per
+reports/phase2_tokeniser.md S14-S19) into permanent regression tests, per
 the brief. Runs the whole corpus once (SBC037 excluded, same as every
 other stage-4 check) and checks:
 
@@ -27,16 +27,15 @@ other stage-4 check) and checks:
      displaced-truncation flush, or the SBC012/SBC013 bare-underscore
      truncation convention) -- "other" must be empty.
 
-Also pins one open, NOT-yet-fixed bug found by the step-3 verification
-(reports/phase2_tokeniser.md S16): the single-angle open/close/wrap
-regex's greedy character class can swallow real spoken content glued
-directly to the delimiter with no space ("<@Mm@>", "<@in San...")
-because it can't distinguish that from a genuine short tag code -- every
-confirmed genuine tag code in this corpus is all-caps, so a lowercase
-letter in the matched name is a strong signal of swallowed content.
-Pinned rather than asserted zero, so a regression (the count growing)
-still fails loudly without re-blocking this suite on something already
-reported and deliberately left open.
+Also guards against a regression of the single-angle tag content-
+swallowing bug found by the step-3 verification and fixed this session
+(reports/phase2_tokeniser.md S17.1/S19): the old open/close/wrap regex's
+greedy character class accepted any letters as a tag name, so real
+content glued to the delimiter with no space ("<@Mm@>", "<@in San...")
+was silently swallowed. Fixed by replacing it with a closed inventory of
+confirmed codes (every one all-caps in this corpus) -- every confirmed
+instance is now 0; asserted as a hard invariant, not a pin, since the
+bug is fixed, not merely tracked.
 
 Slow (~10s: passes over 68,815 IUs) -- computed once per module via a
 fixture, not once per test.
@@ -86,16 +85,6 @@ _KNOWN_D_CATEGORIES = {
     "underscore_truncation_ends_word (documented: bare _ always ends a word)",
 }
 
-# Known, reported, NOT fixed (reports/phase2_tokeniser.md S16): the
-# single-angle tag regex swallows real content glued to it with no
-# space. 19 instances corpus-wide have a lowercase letter in the matched
-# "name" (see angle_tag_names_with_lowercase's own docstring); 17 are
-# high-confidence genuine content loss on manual review, 2 (a repeated
-# "Hi"/"HI" pair, a repeated "X"/"x" pair) are lower-confidence and could
-# be a genuine, if case-inconsistent, tag -- pinned at the full 19 rather
-# than the curated 17, since the pin should track what the objective
-# check actually counts, not a subjective read of which ones are "real."
-_KNOWN_ANGLE_TAG_SWALLOW_COUNT = 19
 
 
 @pytest.fixture(scope="module")
@@ -170,11 +159,9 @@ def test_d_no_wrongful_splits_all_attributable(corpus_invariants):
     assert by_category.get("other", 0) == 0
 
 
-def test_angle_tag_content_swallowing_is_pinned_open_bug(corpus_invariants):
+def test_angle_tag_never_swallows_glued_content(corpus_invariants):
+    # Fixed this session (reports/phase2_tokeniser.md S19): the closed
+    # code inventory means a lowercase letter in a matched angle-tag name
+    # can only mean one thing now -- real content leaking through again.
     count = corpus_invariants["angle_tag_swallows"]
-    assert count == _KNOWN_ANGLE_TAG_SWALLOW_COUNT, (
-        f"angle-tag content-swallowing count changed from the pinned "
-        f"baseline ({_KNOWN_ANGLE_TAG_SWALLOW_COUNT}) to {count} -- "
-        f"re-investigate before repinning: either the known bug grew, or "
-        f"something fixed part of it."
-    )
+    assert count == 0, f"{count} angle-tag match(es) with a lowercase letter in the name -- content-swallowing regression"

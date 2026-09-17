@@ -1559,13 +1559,250 @@ Whole-corpus, current code, SBC037 excluded throughout (59 files):
   (a)/(b)/(c) from §14.4. `sbcsae_tokenizer_crosscheck.py` (§12) is
   unchanged, kept as-is per the brief.
 
-**Stage 4 is still not marked final.** (a) and (d) now have zero
-violations, and every (b) category has been individually verified — but
-that verification itself surfaced a real, new, unattributed bug (§17.1,
-the angle-tag content-swallowing regex, 19 confirmed-or-candidate
-instances). Per the brief's own criterion ("mark stage 4 final only if
-(a), (d) and the verified (b) have no violations outside documented
-rules"), this is exactly the "outside documented rules" case. Next open
-item: decide how the tokeniser should distinguish a tag name from real
-content glued to an angle-tag delimiter, implement it, then re-run every
-check in §11-§18 again before reconsidering "final."
+**Stage 4 was not marked final at the end of the previous session** —
+§17.1's angle-tag content-swallowing bug was confirmed but not fixed. §19
+closes it out.
+
+---
+
+## 19. A closed inventory of angle-tag codes, replacing "any letters"
+
+### 19.1 Building the inventory from the corpus
+
+Per the brief: every single-angle code that occurs in an *unambiguous*
+position — an opening delimiter followed by whitespace, a closing one
+preceded by whitespace — found corpus-wide, keeping only codes confirmed
+as **both** an opener and a closer somewhere (genuine paired usage, not a
+one-off scanning artifact of the whitespace-boundary method itself).
+Double-angle contamination excluded (a naive scan without it wrongly
+attributed double-angle codes like `POUND`/`THUMP` to the single-angle
+inventory, since `<<WRITING` and a single `<` immediately followed by a
+code look identical to a regex that doesn't know about the second `<`).
+
+**35 confirmed codes**, all appearing as a matched open/close pair
+somewhere in the corpus (counts are total open+close occurrences):
+`X` 2420, `VOX` 1074, `@` 803, `P` 365, `Q` 282, `HI` 265, `WH` 247,
+`MRC` 206, `F` 155, `L2` 112, `FOOD` 98, `SING` 87, `SM` 86, `%` 86,
+`READ` 72, `PAR` 57, `L` 46, `YWN` 44, `BR` 22, `YELL` 16, `A` 7,
+`SHOUT` 6, `SMOKING` 4, `FF` 4, `W` 4, `PP` 4, `CRK` 2, `CRY` 2,
+`ACCENT` 2, `NONSENSE` 2, `SIGH` 2, `ACC` 2, `SLUR` 2, `DRINKING` 2,
+`WI` 2. **None fall outside the set this project has already confirmed
+as genuine Du Bois quality/event codes across earlier sessions** — no
+code needed to be excluded as spurious.
+
+One code, `HUMMING`, is added on top of the 35: it occurs **only** as a
+zero-content wrap (`<HUMMING>`, open and close coinciding with nothing
+between), which the whitespace-boundary method structurally cannot see
+(there is no whitespace anywhere in a zero-content wrap to anchor
+either side of the scan). Already established as genuine in a prior
+session (`reports/phase2_tokeniser.md` §9.3e); not re-derived here, only
+carried forward.
+
+### 19.2 Delimiter construction and the ambiguity question
+
+**A delimiter is `<` + an inventory code, or an inventory code + `>`; the
+zero-content wrap (`<CODE>`) is tried first for the same reason
+`double_angle_wrap` already is** (a greedy open tried alone would strand
+the close with nothing left to match). Codes are tried longest-first in
+the regex alternation.
+
+**"If more than one inventory code could match the same delimiter,
+raise" — proven not to arise, not just assumed.** Every code is a
+distinct literal string; for two codes X and Y where X is a proper
+prefix of Y (`P`/`PP`/`PAR`, `F`/`FF`/`FOOD`, `A`/`ACC`/`ACCENT`,
+`L`/`L2`, `W`/`WH`/`WI`), X's own match only succeeds where the
+character immediately after X is *not* part of a longer code — but if
+the raw text actually continues with Y's remaining letters, that
+character *is* alphanumeric, so X's match cannot succeed there. The two
+can therefore never both match the same starting position. Two codes
+that share no such prefix relationship start with different characters
+and trivially cannot match the same position. No runtime ambiguity
+check was needed; none was found in a corpus-wide rerun either.
+
+### 19.3 `<<TAG`/`TAG>>`, checked the same way
+
+**Double-angle: 18 confirmed codes** (`POUND`, `THUMP`, `SNAP`, `CLAP`,
+`PAPER`, `SLAPPING`, `MIC`, `POUNDING`, `WHISTLE`, `SOB`, `FOOTSTEPS`,
+`PAPERS`, `TAP`, `SNAPPING`, `PAT`, `THUMP_MICROPHONE`, `B`,
+`BANG-GLASSES`), plus 7 more found by directly reviewing every
+`double_angle_*` match's content against this list (`SING`, `STAPLE`,
+`SINGING`, `ERASER_NOISE`, `MURMUR`, `LAUGHTER`, `STOMPING` — all
+consistent, sensible sound/event names, one case showing genuine
+Du-Bois-documented crossing nesting, `<<STOMPING<MRC ... MRC>STOMPING>>`).
+`WRITING` (0 opens matched, 2 closes) and `VOMIT-SOUND`/`VOMIT-NOISE`
+(the already-documented `S3b` name-mismatch case) are the only one-sided
+entries, both already explained, not new findings.
+
+**No double-angle delimiter swallows glued content.** Checked directly:
+every `double_angle_open`/`close`/`wrap` match's content, corpus-wide,
+against the combined 25-code list — zero unrecognised names, zero
+lowercase-containing names. The double-angle character class
+(`[A-Za-z_\-]`, no digits/`@`/`%`) and, empirically, consistent spacing
+around every double-angle code in this corpus's actual usage, mean the
+single-angle swallowing mechanism (§17.1) simply doesn't have anywhere
+to manifest here. **No inventory rule was applied to double-angle** —
+there was nothing to fix.
+
+### 19.4 The fix
+
+`angle_open`/`angle_close`/`angle_wrap` (accepted `[A-Za-z0-9@%]+`, any
+letters at all) replaced with `angle_open_code`/`angle_close_code`/
+`angle_wrap_code`/`angle_open_spaced_code`, built from the 36-code
+alternation (§19.1), longest-first. A stray `<` or `>` that matches no
+code — confirmed corpus-wide to never be real content, the same
+strip-and-never-reconstruct treatment already given to NUL bytes and the
+lost-initial-letter artifact — is dropped on its own, letting whatever
+real content sits next to it survive untouched.
+
+**A second, necessary change**: the `word` frag rule's own greedy letter
+class had no way to know that a recognised close code sitting
+immediately ahead of it (`knowX>`, `XXP>`) belongs to the delimiter, not
+the word — it swallowed straight through, exactly the class of bug
+`_glued_frag_follows`/`_sandwiched` already exist to prevent for other
+delimiter shapes (§10.2b, §15). Fixed with a negative-lookahead guard on
+each letter position, stopping the match before it would extend into a
+recognised `CODE>` — `know` is now kept, `X>` is dropped, instead of the
+whole `knowX` leaking through as one bogus word.
+
+**Two named exceptions**, for shapes the general mechanism cannot
+resolve on its own:
+- `<@SM ... SM@>` (SBC001): `@` and `SM` stacked with no space, at both
+  open and close — a compound of two quality markers (a shorthand for
+  the fully-nested `<@<SM ... SM>@>` form), not `@` plus the real word
+  "SM". Without this, "@" (a valid 1-character code on its own) would
+  win first and strand "SM" to leak through as a bogus word.
+- `VOXX>` (SBC058): the closing `VOX` is immediately followed by a
+  third indecipherable-syllable `X` with no space. `VOX` is dropped so
+  the guard doesn't let it leak through as a bogus word; the trailing
+  `X>` is then claimed by the ordinary close-code rule, same as before
+  the fix — this one trailing `X` is not additionally recovered as
+  content (two others already survive earlier in the same IU), an
+  accepted limitation of this single, anchored exception.
+
+### 19.5 All 19 pinned instances, before → after
+
+Raw text is terminal-only per the brief; word counts and identities are
+not transcript text and are reported here as the fix's own evidence.
+"—" means the word did not appear at all (fully swallowed).
+
+| file | code shape | before | after |
+|---|---|---|---|
+| SBC005 | `<@Mm@>` | (nothing) | `Mm` |
+| SBC008 | `Go]=dX>` | `Go` | `God` |
+| SBC013 | `<@She8]` | (nothing) | `She` |
+| SBC013 | `cou_ couch@>` | `cou-` (couch lost) | `cou-`, `couch` |
+| SBC013 | `<@No=4]` | (nothing) | `No` |
+| SBC013 | `<@Do it dad` | `it`, `dad` | `Do`, `it`, `dad` |
+| SBC014 | `<@he thought...@>` | `thought`, `he's`, `been` | `he`, `thought`, `he's`, `been` |
+| SBC015 | `<XOh it does...` | `it`, `does`, `smell` | `Oh`, `it`, `does`, `smell` |
+| SBC016 | `<0r there's...` | `there's`, `one`, `Matt`, `likes` | `r`, `there's`, `one`, `Matt`, `likes` |
+| SBC023 | `<Xbu=tX>` | (nothing) | `but` |
+| SBC023 | `<or did it have...` | `did`, `it`, `have`, `a`, `knobby`, `end` | `or`, `did`, `it`, `have`, `a`, `knobby`, `end` |
+| SBC025 | `<ot,` | (nothing) | `ot` |
+| SBC028 | `<@Oh[2=@>` | (nothing) | `Oh` |
+| SBC029 | `<0h=,` | (nothing) | `h` |
+| SBC029 | `[<X You knowX>]` | `You` | `You`, `know` |
+| SBC033 | `<Hi Whoa= HI>` | `Whoa` | `Hi`, `Whoa` |
+| SBC048 | `<@in San[2ta...` | `Santa`, `Barbara` | `in`, `Santa`, `Barbara` |
+
+17 rows above cover all 19 pinned matches: `SBC023`'s `Xbu`/`tX` are the
+two ends of one word ("but") in a single IU, shown as one row; `SBC023`'s
+19th match, a bare lowercase `x`, is unchanged by the fix (case-sensitive
+matching means it was never swallowed in the first place — kept as an
+ordinary word both before and after) and isn't shown since there's
+nothing to contrast. Two further fixes beyond the pinned 19, found via
+§19.1's own corpus scan rather than the lowercase signal: `SBC001`'s
+`<@SM ... SM@>` compound (previously `SM` leaked as a bogus word at both
+open and close; now correctly absent) and `SBC058`'s `VOXX>` (the
+trailing `X` is still not recovered as content, §19.4 — an accepted
+limitation, not a regression; `VOX` itself is confirmed to never leak as
+a bogus word, which the general mechanism alone would otherwise do).
+
+Two deliberately **not** "fixed" by guessing: `SBC016`/`SBC029`'s `0r`/
+`0h` become `r`/`h` (the stray `<` is dropped, then the existing,
+unrelated lost-initial-letter rule applies exactly as it does everywhere
+else — never reconstruct); `SBC033`'s `Hi` (mixed case) does not
+case-fold to match the confirmed code `HI` — it becomes an ordinary
+word, not a guess at whether the transcriber meant a tag.
+
+All 19 pinned instances plus the 2 additional fixes were verified
+directly against `tokenize()`, both before (checked out from commit
+`90caf8b`) and after this session's change. 8 new hand-written tests
+added to `tests/test_sbcsae_tokenizer.py`; **133 tokenizer tests pass**
+(up from 125 at the start of this session).
+
+### 19.6 Rerun: raises, and all four invariants
+
+Whole-corpus rerun, current code:
+
+- **Raises: 0 of 68,815 (0.00%).**
+- **Zero-word IUs: 5,172** (down from 5,179 — 7 fewer, the IUs where a
+  swallowed word is now recovered and the IU is no longer word-empty);
+  **reference segments: 63,643** (up from 63,636).
+- **(a) No fusion across whitespace: 0 violations.**
+- **(b) No lost words: 1,167 violations** (down from 1,183 — the
+  `angle_tag` category is now empty, and `overlap_bracket` drops from 23
+  to 13, since several of those were actually angle-tag-caused
+  misattributions, §17). Every remaining violation still falls under one
+  of the 8 already-attributed categories from §17; re-verified directly,
+  not assumed: `overlap_bracket`'s 13 and `parenthetical_marker`'s 1,107
+  both checked again with the same §17 method — **0 failures either
+  way**.
+- **(c) Capitalised material**: `I` kept=9,569/removed=0, `TV`
+  kept=23/removed=0 — unchanged, still clean.
+- **(d) No wrongful splits: 21 violations, still 0 unattributed** (the
+  angle-tag fix touches different IUs than the underscore/boundary/
+  displaced-truncation splits (d) catches, so this count is unaffected).
+  Every one, file:line and category:
+
+  ```
+  SBC002:347   underscore_truncation_ends_word
+  SBC010:487   underscore_truncation_ends_word
+  SBC011:36    underscore_truncation_ends_word
+  SBC012:216   boundary_inside_chunk
+  SBC013:2102  underscore_truncation_ends_word
+  SBC013:2103  underscore_truncation_ends_word
+  SBC013:2116  underscore_truncation_ends_word
+  SBC019:937   underscore_truncation_ends_word
+  SBC020:526   boundary_inside_chunk
+  SBC022:55    boundary_inside_chunk
+  SBC023:1222  boundary_inside_chunk
+  SBC023:1253  boundary_inside_chunk
+  SBC024:278   displaced_truncation_flush
+  SBC025:688   underscore_truncation_ends_word
+  SBC031:760   displaced_truncation_flush
+  SBC032:1667  displaced_truncation_flush
+  SBC036:968   displaced_truncation_flush
+  SBC036:1103  displaced_truncation_flush
+  SBC041:188   displaced_truncation_flush
+  SBC058:883   underscore_truncation_ends_word
+  SBC058:883   underscore_truncation_ends_word
+  ```
+
+- `tests/test_tokenizer_invariants.py`'s angle-tag test converted from a
+  pinned-open-bug count (19) to a hard `== 0` assertion — the bug is
+  fixed, not merely tracked, so a future regression fails immediately
+  rather than needing the baseline updated first.
+- Full suite: **667 passed, 11 skipped** (up from 659).
+
+### 19.7 Stage 4 is final
+
+Per the brief's stopping rule: stage 4 is final when every invariant
+violation is attributed to a documented rule or named exception, and no
+new kind of check was introduced this session (only the closed inventory
+and its two named exceptions — (a)-(d) themselves are unchanged from
+§14-§16). That condition now holds:
+
+- (a): 0 violations.
+- (b), verified: every category attributed, including the two spot-
+  checked at scale (`overlap_bracket`, `parenthetical_marker`) and the
+  three checked and found genuinely clean (`disguise_prefix`,
+  `at_sign_fusion`, `underscore_truncation_or_gloss`).
+- (c): real short words never silently removed.
+- (d): all 21 violations attributed to one of three documented
+  mechanisms, listed individually above.
+- Raises: 0.
+
+**Marked final.** Next: the design of the LLM segmentation run
+(`n_samples=5` from the start, per the standing sampling policy) — see
+CLAUDE.md's "Where phase 2 stands."
