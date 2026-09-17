@@ -27,6 +27,14 @@ ALLOWED_EXCEPTION_REASONS = {"dubois_dollar_note", "backslash_fused", "ambiguous
 # update this table in the same commit as an explicit decision, not as a
 # side effect of a rerun.
 ALLOWED_COLUMNS = {
+    "reports/phase2_capitalization.csv": {"category", "label", "n_words", "n_capitalised", "share_capitalised"},
+    "reports/phase2_capitalization_by_file.csv": {
+        "file",
+        "a_n", "b_n", "c_n", "d_n", "e_n", "f_n", "g_n",
+        "a_capitalised", "b_capitalised", "c_capitalised", "d_capitalised",
+        "e_capitalised", "f_capitalised", "g_capitalised",
+    },
+    "reports/phase2_degenerate_threshold.csv": {"metric", "value"},
     "reports/phase2_excluded_lines.csv": {"file", "line", "reason", "content"},
     "reports/phase2_marker_inventory.csv": {
         "class", "tier", "count", "files",
@@ -36,6 +44,18 @@ ALLOWED_COLUMNS = {
     "reports/phase2_marker_no_tier_examples.csv": {"pattern", "file", "line"},
     "reports/phase2_merge_counts.csv": {"file", "raw_lines", "merged_units", "merges"},
     "reports/phase2_nul_bytes.csv": {"file", "line", "byte"},
+    "reports/phase2_per_file_stats.csv": {
+        "file", "words", "reference_segments", "mean_words_per_segment",
+        "median_words_per_segment", "speaker_changes",
+        "share_boundaries_at_speaker_change", "zero_word_ius_dropped_share",
+        "overlap_bracket_density_per_100_words",
+    },
+    "reports/phase2_per_file_stats_summary.csv": {
+        "stat", "words", "reference_segments", "mean_words_per_segment",
+        "median_words_per_segment", "speaker_changes",
+        "share_boundaries_at_speaker_change", "zero_word_ius_dropped_share",
+        "overlap_bracket_density_per_100_words",
+    },
     "reports/phase2_reference_segments_by_file.csv": {
         "file", "segments_before", "segments_after", "dropped",
     },

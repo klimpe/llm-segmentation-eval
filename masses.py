@@ -26,6 +26,31 @@ def masses_to_boundaries(masses: list[int]) -> set[int]:
     return boundaries
 
 
+def boundaries_to_masses(boundaries: set[int], n: int) -> list[int]:
+    """Inverse of masses_to_boundaries: reconstruct masses from a boundary
+    set and the total token count. Every element of `boundaries` must be a
+    valid position (1 <= b < n); out-of-range positions raise rather than
+    being silently clipped or ignored.
+
+    Needed whenever a boundary set is edited directly (e.g. removing the
+    turn-initial positions before within-turn scoring) and must be turned
+    back into masses for the existing mass-based metrics to consume.
+    """
+    if n <= 0:
+        raise ValueError(f"n must be positive, got {n}")
+    bad = [b for b in boundaries if not (1 <= b < n)]
+    if bad:
+        raise ValueError(f"boundary positions out of range [1,{n - 1}]: {sorted(bad)}")
+
+    masses = []
+    prev = 0
+    for b in sorted(boundaries):
+        masses.append(b - prev)
+        prev = b
+    masses.append(n - prev)
+    return masses
+
+
 def assert_comparable(ref_masses: list[int], hyp_masses: list[int]) -> None:
     """Raise ValueError if ref and hyp do not cover the same number of tokens.
 

@@ -1,0 +1,8 @@
+category,label,n_words,n_capitalised,share_capitalised
+a,IU-initial after '.',11235,10558,0.939741878059635
+b,"IU-initial after ','",22584,1783,0.07894969890187743
+c,IU-initial after '?',1098,1015,0.924408014571949
+d,IU-initial after '--',2759,1534,0.5559985501993476
+e,turn-initial,21426,18379,0.857789601418837
+f,IU-internal,179917,7338,0.04078547330157795
+g,"IU-initial, no marker (residual)",89,73,0.8202247191011236

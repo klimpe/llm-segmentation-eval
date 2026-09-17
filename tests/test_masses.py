@@ -2,7 +2,7 @@ import random
 
 import pytest
 
-from masses import assert_comparable, flags_to_masses, masses_to_boundaries
+from masses import assert_comparable, boundaries_to_masses, flags_to_masses, masses_to_boundaries
 
 
 def test_docstring_example():
@@ -79,4 +79,43 @@ def test_round_trip_random(seed):
 
     assert sum(masses) == n_tokens
     assert len(masses) - 1 == len(boundaries)
+    assert masses_to_boundaries(masses) == boundaries
+    assert boundaries_to_masses(boundaries, n_tokens) == masses
+
+
+def test_boundaries_to_masses_docstring_example():
+    assert boundaries_to_masses({3, 7}, 10) == [3, 4, 3]
+
+
+def test_boundaries_to_masses_empty():
+    assert boundaries_to_masses(set(), 5) == [5]
+
+
+def test_boundaries_to_masses_every_position():
+    assert boundaries_to_masses({1, 2, 3}, 4) == [1, 1, 1, 1]
+
+
+def test_boundaries_to_masses_rejects_zero_position():
+    with pytest.raises(ValueError, match=r"out of range"):
+        boundaries_to_masses({0, 3}, 10)
+
+
+def test_boundaries_to_masses_rejects_position_at_or_past_n():
+    with pytest.raises(ValueError, match=r"out of range"):
+        boundaries_to_masses({3, 10}, 10)
+
+
+def test_boundaries_to_masses_rejects_non_positive_n():
+    with pytest.raises(ValueError, match=r"n must be positive"):
+        boundaries_to_masses(set(), 0)
+
+
+@pytest.mark.parametrize("seed", range(50))
+def test_boundaries_to_masses_inverts_masses_to_boundaries_random(seed):
+    rng = random.Random(1000 + seed)
+    n_tokens = rng.randint(1, 30)
+    candidate_positions = range(1, n_tokens)
+    boundaries = {p for p in candidate_positions if rng.random() < 0.4}
+    masses = boundaries_to_masses(boundaries, n_tokens)
+    assert sum(masses) == n_tokens
     assert masses_to_boundaries(masses) == boundaries
