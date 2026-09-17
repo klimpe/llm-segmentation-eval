@@ -11,11 +11,32 @@ correctly-segmented rapid speech as a model failure.
 Instead: find the longest run of consecutive WITHIN-TURN reference
 boundaries that actually occurs, per 600-word scored window, anywhere in
 the whole corpus (59 files, SBC037 excluded) -- i.e. the most extreme
-legitimate case the reference itself contains -- and set the flag
-threshold one above it. Turn (speaker-change) boundaries are excluded
-from this count: they are given to the model for free (see
-sbcsae_scoring.py), never part of what a within-turn hypothesis predicts,
-so a run of them is not a comparable phenomenon.
+legitimate case the reference itself contains. Turn (speaker-change)
+boundaries are excluded from this count: they are given to the model for
+free (see sbcsae_scoring.py), never part of what a within-turn hypothesis
+predicts, so a run of them is not a comparable phenomenon.
+
+That longest legitimate run is **11** (SBC038, words 2401-3000).
+
+**Auto-flag threshold: 22 (twice 11), not 12 (one more than 11).** One
+more than the observed maximum treats the single most extreme legitimate
+case the corpus happens to contain as the ceiling -- but that maximum
+was found over a finite sample (59 files); a threshold sitting right at
+its edge would auto-flag the next real run that is merely as extreme,
+which is not evidence of a model failure, just of the corpus containing
+more than one case near its own extreme. Doubling leaves headroom
+proportional to the phenomenon's own observed scale, per
+reports/phase2_llm_design.md S3.
+
+**This does not mean everything under 22 is ignored.** Per the pilot
+review policy: every draw containing a run STRICTLY LONGER than 11 (the
+actual longest legitimate run, not the doubled threshold) is listed for
+manual reading, whether or not it crosses 22 and gets auto-flagged. A
+run of, say, 15 is unprecedented in the reference and worth a human
+look even though it stays under the auto-flag line; MANUAL_REVIEW_RUN
+and DEGENERATE_FLAG_THRESHOLD are deliberately two different numbers
+for two different jobs -- one triggers an automatic label, the other
+triggers a human reading a specific draw.
 
 Whole-corpus run, terminal output only plus one small committed CSV (two
 numbers, no transcript text).
@@ -29,6 +50,26 @@ from sbcsae_reader import iter_trn_documents
 from sbcsae_windows import build_score_regions
 
 EXCLUDE_FILES = {"SBC037"}
+
+# Set from the corpus-observed maximum (see longest_within_turn_run_per_window,
+# run once, result hand-recorded here rather than recomputed live -- the
+# corpus does not change between runs of a real pilot).
+MAX_LEGITIMATE_RUN = 11
+DEGENERATE_FLAG_THRESHOLD = 2 * MAX_LEGITIMATE_RUN  # 22
+
+
+def review_policy(run_length: int) -> dict:
+    """What to do with one observed run of consecutive predicted
+    within-turn boundaries, in a real pilot run: whether it gets the
+    automatic "degenerate" label, and whether it goes on the manual
+    reading list regardless of that label -- the two thresholds are
+    deliberately different (see module docstring).
+    """
+    return {
+        "run_length": run_length,
+        "flagged_degenerate": run_length > DEGENERATE_FLAG_THRESHOLD,
+        "needs_manual_review": run_length > MAX_LEGITIMATE_RUN,
+    }
 
 
 def max_consecutive_run(sorted_positions: list[int]) -> int:
@@ -77,13 +118,21 @@ def longest_within_turn_run_per_window():
 
 def main():
     overall_max, overall_loc, per_file_max = longest_within_turn_run_per_window()
-    threshold = overall_max + 1
+    if overall_max != MAX_LEGITIMATE_RUN:
+        print(
+            f"NOTE: recomputed longest legitimate run is {overall_max}, but "
+            f"MAX_LEGITIMATE_RUN is hand-set to {MAX_LEGITIMATE_RUN} -- update the "
+            f"constant (and DEGENERATE_FLAG_THRESHOLD) if the corpus or its "
+            f"reader/tokeniser have changed since that figure was recorded."
+        )
 
     print(f"Longest run of consecutive within-turn reference boundaries, per 600-word "
           f"scored window, across all 59 files: {overall_max}")
     print(f"  (found in {overall_loc[0]}, window scoring words {overall_loc[1]}-{overall_loc[2]})")
-    print(f"Degenerate-output flag threshold: {threshold} "
-          f"(one more than the longest legitimate run observed)")
+    print(f"Degenerate-output flag threshold: {DEGENERATE_FLAG_THRESHOLD} "
+          f"(2x the longest legitimate run, {MAX_LEGITIMATE_RUN})")
+    print(f"Manual-review threshold: any run > {MAX_LEGITIMATE_RUN} "
+          f"(independent of the auto-flag threshold -- see review_policy)")
 
     reports_dir = Path("reports")
     with open(reports_dir / "phase2_degenerate_threshold.csv", "w", newline="", encoding="utf-8") as f:
@@ -93,7 +142,9 @@ def main():
         w.writerow(["longest_observed_file", overall_loc[0]])
         w.writerow(["longest_observed_window_score_start", overall_loc[1]])
         w.writerow(["longest_observed_window_score_end", overall_loc[2]])
-        w.writerow(["degenerate_flag_threshold", threshold])
+        w.writerow(["max_legitimate_run", MAX_LEGITIMATE_RUN])
+        w.writerow(["degenerate_flag_threshold", DEGENERATE_FLAG_THRESHOLD])
+        w.writerow(["manual_review_threshold", MAX_LEGITIMATE_RUN])
 
     print("\nPer-file max run (top 10):")
     for doc_id, m in sorted(per_file_max.items(), key=lambda kv: -kv[1])[:10]:

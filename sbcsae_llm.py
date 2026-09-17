@@ -103,13 +103,27 @@ def build_document_structure(doc_id: str, units) -> DocumentStructure:
 # ---------------------------------------------------------------------
 
 
+def _word_piece(idx: int, word: Word) -> str:
+    """"i:word", word lowercased for rendering only. Word.text itself
+    (the masses/scoring identity) is untouched -- see the lowercasing
+    section of reports/phase2_llm_design.md: capitalisation was found to
+    leak the same boundary signal CLAUDE.md already strips via Boundary
+    items (94% capitalised after '.', 86% turn-initial, vs. 4%
+    IU-internal), so every rendered word is lowercased uniformly
+    (including "I"), never positionally -- a positional rule would just
+    re-encode the same signal a different way.
+    """
+    return f"{idx}:{word.text.lower()}"
+
+
 def render_turn_line(turn: Turn, condition: Condition, start_override: int | None = None) -> str:
     """Render one turn as "SPEAKER: i:word i:word ..." (condition A), or
     the same with tier-2 cues inserted inline, unindexed, at their
     original position (condition B). A is exactly B with every Cue
     dropped -- same pieces list, same join, same indices -- so the A/B
     difference in a prompt can only ever be the presence of cues, never
-    line breaks, labels, or indexing.
+    line breaks, labels, or indexing. Rendered words are lowercased
+    (see _word_piece); the speaker label and cue symbols are not.
 
     start_override lets a caller (the windowing code) renumber a turn
     that is only partially inside a window; by default the turn's own
@@ -119,7 +133,7 @@ def render_turn_line(turn: Turn, condition: Condition, start_override: int | Non
     pieces = []
     for it in turn.items:
         if isinstance(it, Word):
-            pieces.append(f"{idx}:{it.text}")
+            pieces.append(_word_piece(idx, it))
             idx += 1
         elif isinstance(it, Cue) and condition is Condition.B:
             pieces.append(it.raw)
@@ -254,7 +268,7 @@ def render_window(doc: DocumentStructure, window_start: int, window_end: int, co
         pieces = []
         for it in sliced:
             if isinstance(it, Word):
-                pieces.append(f"{idx}:{it.text}")
+                pieces.append(_word_piece(idx, it))
                 idx += 1
             elif isinstance(it, Cue) and condition is Condition.B:
                 pieces.append(it.raw)

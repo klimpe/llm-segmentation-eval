@@ -3,4 +3,6 @@ longest_observed_within_turn_run,11
 longest_observed_file,SBC038
 longest_observed_window_score_start,2401
 longest_observed_window_score_end,3000
-degenerate_flag_threshold,12
+max_legitimate_run,11
+degenerate_flag_threshold,22
+manual_review_threshold,11

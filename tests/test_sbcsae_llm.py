@@ -5,6 +5,8 @@ first-15-IU SBC001 rendering sketch already checked by hand in the prior
 session, so a future change to tokenize()'s rule table or to this
 module's grouping logic is caught here without needing the corpus.
 """
+import re
+
 from sbcsae_reader import IntonationUnit
 from sbcsae_tokenizer import Condition, Cue
 from sbcsae_llm import build_document_structure, render_document, render_turn_line, render_window
@@ -80,7 +82,7 @@ def test_words_are_indexed_cues_are_not():
     units = [iu("X", "(H) hi there")]
     doc = build_document_structure("TEST", units)
     b = render_turn_line(doc.turns[0], Condition.B)
-    assert b == "X: (H) 1:hi 2:there"
+    assert b == "X: (H) 1:hi 2:there"  # already lowercase, so no change from the lowercasing rule
 
 
 def test_indices_are_global_across_turns():
@@ -120,10 +122,13 @@ def test_render_document_first_15_ius_of_sbc001_condition_a():
     assert doc.turns[0].n_words == 18
     rendered = render_document(doc, Condition.A)
     lines = rendered.split("\n")
-    assert lines[0].startswith("LENORE: 1:So 2:you 3:don't 4:need 5:to 6:go 7:borrow")
-    assert "16:Do 17:the 18:hooves" in lines[0]
-    assert lines[1].startswith("LYNNE: 19:Well")
-    assert lines[2].startswith("DORIS: 29:So 30:Mae-")
+    # Speaker labels stay as transcribed (uppercase); rendered words are
+    # lowercased uniformly, "So" -> "so" included (the lowercasing rule
+    # from reports/phase2_llm_design.md).
+    assert lines[0].startswith("LENORE: 1:so 2:you 3:don't 4:need 5:to 6:go 7:borrow")
+    assert "16:do 17:the 18:hooves" in lines[0]
+    assert lines[1].startswith("LYNNE: 19:well")
+    assert lines[2].startswith("DORIS: 29:so 30:mae-")
 
 
 def test_render_window_cuts_mid_turn_but_still_shows_speaker_label():
@@ -161,3 +166,66 @@ def test_render_window_leading_cue_attaches_to_the_word_after_the_cut():
     doc = build_document_structure("TEST", units)
     rendered = render_window(doc, 4, 6, Condition.B)
     assert rendered == "A: (Hx) 4:four 5:five"
+
+
+# ---------------------------------------------------------------------
+# Lowercasing (reports/phase2_llm_design.md S1)
+# ---------------------------------------------------------------------
+
+
+def _rendered_words(line: str) -> list[str]:
+    """Extract just the word text from each "idx:word" piece on a
+    rendered line, skipping the speaker label and any cue symbols (which
+    never match "digits colon text").
+    """
+    return [m.group(1) for m in re.finditer(r"\d+:(\S+)", line)]
+
+
+def test_no_rendered_word_contains_an_uppercase_letter():
+    units = [
+        iu("KIRSTEN", "I went to Antarctica with Don and Lori"),
+        iu("DON", "I wasn't THERE that weekend"),
+        iu("LORI", "Really? I didn't know That"),
+    ]
+    doc = build_document_structure("TEST", units)
+    for condition in (Condition.A, Condition.B):
+        rendered = render_document(doc, condition)
+        for line in rendered.split("\n"):
+            for word in _rendered_words(line):
+                assert word == word.lower(), f"uppercase leaked into rendered word: {word!r}"
+
+
+def test_literal_i_is_lowercased_too():
+    units = [iu("A", "I know I said I would")]
+    doc = build_document_structure("TEST", units)
+    rendered = render_turn_line(doc.turns[0], Condition.A)
+    assert "1:i" in rendered
+    assert ":I " not in rendered and not rendered.endswith(":I")
+
+
+def test_speaker_label_and_cue_symbols_are_not_lowercased():
+    units = [iu("KIRSTEN", "(H) Hello THERE")]
+    doc = build_document_structure("TEST", units)
+    rendered = render_turn_line(doc.turns[0], Condition.B)
+    assert rendered.startswith("KIRSTEN: ")  # label untouched
+    assert "(H)" in rendered  # cue symbol untouched
+    assert "1:hello" in rendered and "2:there" in rendered  # words lowercased
+
+
+def test_condition_a_and_b_of_a_window_differ_only_by_cues_after_lowercasing():
+    units = [
+        iu("KIRSTEN", "(H) I Went To Antarctica"),
+        iu("DON", "Really (Hx) I Know That"),
+    ]
+    doc = build_document_structure("TEST", units)
+    a = render_document(doc, Condition.A)
+    b = render_document(doc, Condition.B)
+    cue_raws = {it.raw for t in doc.turns for it in t.items if isinstance(it, Cue)}
+    b_without_cues_lines = []
+    for line in b.split("\n"):
+        pieces = [p for p in line.split(" ") if p not in cue_raws]
+        b_without_cues_lines.append(" ".join(pieces))
+    assert "\n".join(b_without_cues_lines) == a
+    for line in a.split("\n"):
+        for word in _rendered_words(line):
+            assert word == word.lower()

@@ -70,6 +70,9 @@ ALLOWED_COLUMNS = {
     "reports/phase2_tokenizer_words_per_iu.csv": {"n_words", "n_ius"},
     "reports/phase2_tokenizer_zero_word_by_file.csv": {"file", "zero_word_ius"},
     "reports/phase2_tokenizer_zero_word_composition.csv": {"composition", "count"},
+    "reports/phase2_truncation_position.csv": {
+        "category", "n_truncated", "share_of_truncated", "n_all_words", "truncation_rate",
+    },
     "results/eng.rst.gum_dev_excluded.csv": {"doc_id", "masked_fraction", "reason"},
     "results/eng.rst.gum_dev_failures.csv": {"doc_id", "reason"},
     "results/eng.rst.gum_dev_masking.csv": {"doc_id", "n_tokens", "masked_fraction"},

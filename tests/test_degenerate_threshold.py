@@ -1,4 +1,9 @@
-from sbcsae_degenerate_threshold import max_consecutive_run
+from sbcsae_degenerate_threshold import (
+    DEGENERATE_FLAG_THRESHOLD,
+    MAX_LEGITIMATE_RUN,
+    max_consecutive_run,
+    review_policy,
+)
 
 
 def test_empty():
@@ -30,3 +35,34 @@ def test_unsorted_input_is_not_handled_gracefully_by_design():
     # Documented here so a future caller doesn't assume this sorts for
     # them, or that its output means anything on unsorted input.
     assert max_consecutive_run([5, 3, 4]) == 2
+
+
+def test_thresholds_are_11_and_22():
+    assert MAX_LEGITIMATE_RUN == 11
+    assert DEGENERATE_FLAG_THRESHOLD == 22
+
+
+def test_run_at_or_below_max_legitimate_needs_no_review_and_is_not_flagged():
+    result = review_policy(11)
+    assert result == {"run_length": 11, "flagged_degenerate": False, "needs_manual_review": False}
+
+
+def test_run_between_max_legitimate_and_flag_threshold_is_reviewed_but_not_flagged():
+    # 15 is unprecedented in the reference (> 11) but stays under the
+    # doubled auto-flag line (22) -- this is exactly the gap the two
+    # separate thresholds exist to cover.
+    result = review_policy(15)
+    assert result["needs_manual_review"] is True
+    assert result["flagged_degenerate"] is False
+
+
+def test_run_above_flag_threshold_is_both_flagged_and_reviewed():
+    result = review_policy(23)
+    assert result["needs_manual_review"] is True
+    assert result["flagged_degenerate"] is True
+
+
+def test_run_exactly_at_flag_threshold_is_not_yet_flagged():
+    result = review_policy(DEGENERATE_FLAG_THRESHOLD)
+    assert result["flagged_degenerate"] is False  # strictly greater than, not >=
+    assert result["needs_manual_review"] is True
