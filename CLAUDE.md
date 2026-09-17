@@ -348,10 +348,11 @@ Stages 1–4 complete. Stage 4 (tokeniser) is **final**
 (`reports/phase2_tokeniser.md` §19.7): 0 raises over 68,815 IUs (excl.
 SBC037), 5,172 zero-word IUs dropped, 63,643 reference segments; the
 pending-word bug, the doubled-cue/cue-then-bracket fusion bug, and the
-angle-tag content-swallowing bug are all fixed; invariants (a) and (d)
-have zero violations, (b) is individually verified category by category
-with zero violations outside a documented rule, and (c)'s spot check
-holds. Regression tests for all four invariants (`tests/
+angle-tag content-swallowing bug are all fixed; (a) has zero violations;
+(d) has 21 violations, every one attributed to a documented rule (zero
+unattributed); (b) is individually verified category by category with
+zero violations outside a documented rule; and (c)'s spot check holds.
+Regression tests for all four invariants (`tests/
 test_tokenizer_invariants.py`) run every time, so a future regression in
 any of this fails loudly rather than drifting unnoticed.
 
