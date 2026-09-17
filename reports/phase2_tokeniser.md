@@ -1705,18 +1705,31 @@ not transcript text and are reported here as the fix's own evidence.
 | SBC033 | `<Hi Whoa= HI>` | `Whoa` | `Hi`, `Whoa` |
 | SBC048 | `<@in San[2ta...` | `Santa`, `Barbara` | `in`, `Santa`, `Barbara` |
 
-17 rows above cover all 19 pinned matches: `SBC023`'s `Xbu`/`tX` are the
-two ends of one word ("but") in a single IU, shown as one row; `SBC023`'s
-19th match, a bare lowercase `x`, is unchanged by the fix (case-sensitive
-matching means it was never swallowed in the first place — kept as an
-ordinary word both before and after) and isn't shown since there's
-nothing to contrast. Two further fixes beyond the pinned 19, found via
-§19.1's own corpus scan rather than the lowercase signal: `SBC001`'s
-`<@SM ... SM@>` compound (previously `SM` leaked as a bogus word at both
-open and close; now correctly absent) and `SBC058`'s `VOXX>` (the
-trailing `X` is still not recovered as content, §19.4 — an accepted
-limitation, not a regression; `VOX` itself is confirmed to never leak as
-a bogus word, which the general mechanism alone would otherwise do).
+17 rows above cover 18 of 19 pinned matches: `SBC023`'s `Xbu`/`tX` are
+the two ends of one word ("but") in a single IU, shown as one row. The
+19th, `SBC023`'s bare lowercase `x` (`[5<X I mean even the x>5] --`),
+is the one instance where "before" was checked directly and turned out
+different from what the write-up originally assumed: the *old* pattern
+(`[A-Za-z0-9@%]+`) is case-*insensitive* by construction (the class
+includes both cases), so lowercase `x` was swallowed there too (`I`,
+`mean`, `even`, `the` — no `x`); after the fix, the closed inventory is
+case-**sensitive** (`X`, not `x`, is the confirmed code), so `x` no
+longer matches any code and survives as an ordinary word (`I`, `mean`,
+`even`, `the`, `x`) — an 18th genuine fix, not a no-op as an earlier
+draft of this section said before the "before" case was actually run.
+
+Two further cases checked directly, both **not** additional fixes on
+inspection: `SBC001`'s `<@SM ... SM@>` and `SBC058`'s `VOXX>` were
+already handled correctly by the *old* pattern too, by accident of its
+own unrestricted greediness (it consumed `@SM`/`SM@` and `VOXX>` whole,
+the same outcome the new closed-inventory rule + named exceptions now
+produce by design) — before and after are identical for both. Included
+in §19.4 because implementing the closed inventory *without* the two
+named exceptions would have newly broken them (a stricter, code-anchored
+match on just `@` or `X` would strand `SM`/`VOX` as bogus leaked words
+where the old unrestricted pattern happened not to) — reported here as
+regressions-avoided-during-the-fix, not as pre-existing bugs this
+session found and fixed.
 
 Two deliberately **not** "fixed" by guessing: `SBC016`/`SBC029`'s `0r`/
 `0h` become `r`/`h` (the stray `<` is dropped, then the existing,
