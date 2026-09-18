@@ -89,6 +89,15 @@ No sample had an auto-flagged (run > 22) window this condition.
 | 0 | 1 | 15 | False | True |
 | 3 | 5 | 26 | True | True |
 
+Both read in full (indices, rendered text, reference boundaries):
+**enumeration, not a plausible segmentation, in both cases** -- a new
+intonation unit marked at literally every word for 15 (sample 0/window
+1) and 26 (sample 3/window 5) consecutive words, matching only 3-4 real
+reference boundaries over each span (reports/phase2_llm_design.md S8).
+Only the run-15 draw stays in the aggregates below (11 < 15 <= 22: flagged
+for manual reading, not auto-flagged); the run-26 draw (>22) is excluded
+and reported on its own, in the "Auto-flagged draws" table below.
+
 ### Whole-file scores per sample (intonation units, not discourse units; within-turn is the headline; precision/recall/boundary-count ratio/Boundary Similarity from the same unchanged metrics.py functions score_document already called)
 
 | sample | scope | precision | recall | F1 | hyp/ref boundary ratio | Boundary Similarity | WindowDiff |
@@ -127,6 +136,31 @@ No sample had an auto-flagged (run > 22) window this condition.
 |---|---|---|---|---|---|---|---|---|---|
 | n | 194 | 298 | 1112 | 2442 | 699 | 273 | 171 | 595 | 5784 |
 
+#### The -1 offset asymmetry (1,112 at -1 vs 699 at +1; condition A is nearly symmetric): does it sit next to cues?
+
+`sbcsae_cue_adjacency.py`, reading only these cached draws (no model
+calls), checked cue adjacency two ways for the same population as the
+table above, split by offset bucket: (a) is the hypothesis boundary's
+OWN position immediately followed/preceded by a cue in the rendered
+text, and (b) is the TRUE reference boundary it is nearest to itself
+cue-marked (i.e. would the cue rule, below, have predicted it). (a) is
+unremarkable at -1 (7.6% followed, 16.1% preceded -- lower than most
+other buckets); (b) is not:
+
+| offset | -3 | -2 | -1 | 0 | +1 | +2 | +3 | beyond |
+|---|---|---|---|---|---|---|---|---|
+| true boundary cue-marked | 42.8% | 47.0% | **75.4%** | 63.8% | 50.6% | 46.5% | 54.4% | 46.4% |
+
+**Yes, the -1 mass sits next to cues** -- 75.4% of offset -1 errors are
+nearest a true boundary that is itself cue-marked, higher than any other
+bucket including exact matches (63.8%). Condition A shows 0% throughout
+by construction (it renders no cues at all -- see
+reports/phase2_llm_design.md S11). This reads as an indexing ambiguity,
+not a segmentation failure: at a cue-marked boundary, the model may be
+naming the last word before the interruption rather than the first word
+after it. Addressed in the prompt (reports/phase2_llm_design.md S11) and
+tested by rerunning this file (below).
+
 ### Per-window scores by window position (intonation units, not discourse units; mean over samples where that window's own draw succeeded and was not auto-flagged -- window scope only, independent of whether other windows in the same sample failed). Reference covariates (mean within-turn segment length, speaker changes, overlap-bracket density) are condition-independent properties of this window's own reference, shown alongside the scores they plausibly explain -- not a claim that score changes by window position are a drift or trend over the document, since windows are scored independently and differ in reference difficulty, not in position per se.
 
 | window | score range (words) | ref mean seg length | speaker changes | overlap-bracket density /100w | n samples | within_turn F1 mean [range] | all_boundaries F1 mean [range] |
@@ -147,4 +181,63 @@ No sample had an auto-flagged (run > 22) window this condition.
 | 1-200 | 0.3788 | 0.5735 | 0.4562 | 667 | 1094 | 496 |
 | 201-400 | 0.4152 | 0.6013 | 0.4912 | 739 | 1041 | 490 |
 | 401-600 | 0.4614 | 0.7622 | 0.5749 | 1029 | 1201 | 321 |
+
+## Model vs. the cue rule: within-turn F1
+
+The model's condition-B within-turn F1 on this pilot (mean 0.5086, table
+above) sits **below** the cue rule's (reports/phase2_baselines.md; the
+deterministic "boundary before a word preceded by a pause/breath" rule
+of reports/phase2_llm_design.md S10) -- **0.51 on this one file for the
+model vs. 0.60 as the cue rule's own whole-corpus (59-file) macro-mean**
+(0.5692 on SBC039 itself, 0.5998 macro-mean across the corpus). These two
+numbers are NOT the same kind of figure: the model's is a 5-sample pilot
+on one file; the cue rule's is deterministic and evaluated whole-corpus,
+because it involves no model call (reports/phase2_llm_design.md S10).
+Read together, though, they say something plain: **in condition B, the
+model does not exploit the prosodic cues it is shown as effectively as a
+one-line rule that only checks for a pause or an in-breath before a
+word.** Whatever the model is doing with condition B's cues, it is not
+simply "place a boundary after every cue" -- if it were, it would match
+or exceed the cue rule's own F1, not trail it.
+
+## SBC039 rerun, condition B only, clarified prompt (reports/phase2_llm_design.md S11)
+
+n_samples=5, same file, same windows, into a separate cache
+(`llm_output_sbcsae_rerun_b/`) -- the original B cache is untouched, so
+both runs remain independently reproducible. **This is a second 5-sample
+pilot on the same one file, not a corpus-scale result**; the same
+"supports no conclusion about A vs B, or about this model's segmentation
+ability in general" caveat from the top of this report applies to the
+comparison below just as much as to the original run.
+
+| | original B | rerun B (clarified prompt) |
+|---|---|---|
+| window draws failed to parse/align | 0 of 40 | 0 of 40 |
+| samples with a run > 11 (needs manual reading) | 2 (1 auto-flagged, >22) | 0 |
+| samples in aggregate (auto-flagged excluded) | 4 | 5 |
+| within_turn precision, mean [range] | 0.4226 [0.3964, 0.4474] | 0.4600 [0.4387, 0.4824] |
+| within_turn recall, mean [range] | 0.6410 [0.5731, 0.6880] | 0.6209 [0.5587, 0.6540] |
+| within_turn F1, mean [range] | 0.5086 [0.4886, 0.5422] | 0.5278 [0.5062, 0.5446] |
+| offset 0 (exact match), share of within-turn boundaries | 2442/5784 = 42.2% | 2378/5177 = 45.9% |
+| offset -1, share | 1112/5784 = 19.2% | 1033/5177 = 20.0% |
+| offset +1, share | 699/5784 = 12.1% | 516/5177 = 10.0% |
+| -1 : +1 ratio | 1.59 | 2.00 |
+
+**Mixed, and not a clean confirmation.** No draw in the rerun crossed the
+degenerate-run threshold (0 of 5 samples, vs. 2 of 5 originally) and
+within-turn F1 and the exact-match share both moved up slightly -- but
+these are single small-sample comparisons (n=4 vs n=5, plus the
+original's own [0.4886, 0.5422] F1 range already brackets the rerun's
+0.5278 mean) and could easily be resampling noise, not a causal effect
+of the prompt change (CLAUDE.md: "Phase 1 produced several
+document-level findings that did not survive resampling"). **The -1
+asymmetry itself did not shrink -- proportionally it grew slightly**
+(-1:+1 ratio 1.59 -> 2.00). The clarified wording did not visibly fix
+the specific imbalance it was written to address, on this one file at
+this sample size. This does not overturn S11's cue-adjacency finding
+(that finding is about where the -1 errors sit, not about whether one
+rewording should have closed the gap) but it means the indexing-clarity
+hypothesis is not yet confirmed as sufficient, only motivated. Scaling
+to more files, not more rewording of one prompt sentence on one file,
+is the right next step for resolving it.
 

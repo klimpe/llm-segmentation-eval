@@ -42,6 +42,20 @@ def window_diff(ref_masses: list[int], hyp_masses: list[int], k: int | None = No
 
     k defaults to round(mean reference segment length / 2), per the original
     paper, with a floor of 2 (matching the reference `segeval` implementation).
+
+    Implementation note (not a definition change -- see
+    tests/test_window_diff_speed.py for the equivalence proof against the
+    previous implementation): each window's ref/hyp boundary count is
+    updated incrementally as the window slides by one position, rather
+    than rescanned from scratch by iterating the full boundary set for
+    every window position. The previous implementation was
+    O(n_windows * (|ref_b| + |hyp_b|)), effectively O(n^2) on a document
+    with a boundary roughly every few tokens (this corpus's own IU
+    density) -- the documented bottleneck for scoring the whole-document,
+    100-draws-per-file random baseline (reports/phase2_baselines.md).
+    This one is O(n): O(k) to seed the first window, then O(1) amortized
+    per remaining window (one set-membership check per side per boundary
+    that leaves or enters).
     """
     assert_comparable(ref_masses, hyp_masses)
     n = sum(ref_masses)
@@ -57,11 +71,26 @@ def window_diff(ref_masses: list[int], hyp_masses: list[int], k: int | None = No
     if n_windows <= 0:
         raise ValueError(f"window size k={k} too large for document of {n} units")
 
-    disagreements = 0
-    for start in range(1, n_windows + 1):
-        end = start + k  # window covers gap positions [start, end)
-        ref_count = sum(1 for b in ref_b if start <= b < end)
-        hyp_count = sum(1 for b in hyp_b if start <= b < end)
+    # Seed the first window [1, k] (inclusive), matching the original
+    # loop's start=1 case (end=1+k, condition b < end means b <= k).
+    ref_count = sum(1 for b in range(1, k + 1) if b in ref_b)
+    hyp_count = sum(1 for b in range(1, k + 1) if b in hyp_b)
+    disagreements = int(ref_count != hyp_count)
+
+    # Slide the window one position at a time: moving from `start-1` to
+    # `start` drops position `start-1` (no longer >= the new start) and
+    # picks up position `start+k-1` (now < the new end = start+k).
+    for start in range(2, n_windows + 1):
+        leaving = start - 1
+        entering = start + k - 1
+        if leaving in ref_b:
+            ref_count -= 1
+        if entering in ref_b:
+            ref_count += 1
+        if leaving in hyp_b:
+            hyp_count -= 1
+        if entering in hyp_b:
+            hyp_count += 1
         disagreements += ref_count != hyp_count
 
     return disagreements / n_windows

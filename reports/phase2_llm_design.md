@@ -352,10 +352,110 @@ per-subset problems behind an aggregate, not about table size). Overall
 figures are a macro mean across files with the across-file range shown
 alongside, not a single pooled number, for the same reason.
 
-`window_diff` (from `metrics.py`, unchanged) is O(n²) in its naive
-sliding-window implementation; scoring 100 random draws per file at
-whole-document length made the corpus-wide run the slowest script in the
-pipeline (on the order of a minute per file). Left as is: `metrics.py` is
-explicitly out of scope for "improvement" (CLAUDE.md, "What not to do"),
-and the run only needs to happen once per corpus-affecting change, not
-per model call.
+`window_diff`'s original implementation was O(n²) in its naive
+sliding-window scan; scoring 100 random draws per file at whole-document
+length made the corpus-wide run the slowest script in the pipeline (on
+the order of a minute per file). **Since optimised (§12)** — the
+corpus-wide baseline run now completes in well under a minute total, not
+per file — without changing the metric's published definition, only the
+implementation.
+
+## 11. Prompt indexing convention: first word of the new unit, never the last of the old one
+
+**Finding.** The pilot's offset-distribution table (reports/
+phase2_pilot.md) shows condition B's within-turn errors skewed toward
+offset -1 (1,112 boundaries) far more than +1 (699) -- condition A is
+nearly symmetric. `sbcsae_cue_adjacency.py`, reading only the cached
+pilot draws (no model calls), checked whether this skew coincides with
+prosodic cues: for each hypothesis boundary, whether the TRUE reference
+boundary it is nearest to is itself cue-marked (i.e. would the cue rule,
+§10, have predicted it), broken down by offset bucket. Result (condition
+B; condition A renders no cues at all, so this question is 0% there by
+construction):
+
+| offset | -3 | -2 | -1 | 0 | +1 | +2 | +3 | beyond |
+|---|---|---|---|---|---|---|---|---|
+| true boundary cue-marked | 42.8% | 47.0% | **75.4%** | 63.8% | 50.6% | 46.5% | 54.4% | 46.4% |
+
+The -1 bucket's own local cue-adjacency (a cue immediately next to the
+*hypothesis's own* position) is unremarkable -- 7.6% immediately followed
+by a cue, 16.1% immediately preceded, both lower than most other
+buckets. But 75.4% of offset -1 errors are nearest a reference boundary
+that IS cue-marked -- higher than any other bucket, including exact
+matches (63.8%). The -1 mass concentrates specifically at true,
+cue-marked boundaries, with the model's answer landing one word short of
+them.
+
+**Decision.** This pattern is consistent with an indexing ambiguity, not
+a segmentation-ability gap: at a cue-marked boundary, "where do you
+report the position" has two plausible readings -- the last word before
+the interruption, or the first word after it -- and the prompt did not
+say which. Added to `sbcsae_llm._IU_DEFINITION`: "A reported position is
+always the first word of the new intonation unit -- never the last word
+of the one before it," with a short invented example (not drawn from the
+corpus). Nothing was added about how cues relate to boundaries -- that
+relationship is exactly what condition B's cue-visibility manipulation
+exists to let the model discover or fail to discover on its own (§9's
+"purely denotational, never relational" principle for the cue glossary
+applies here too).
+
+## 12. `window_diff` speed: implementation optimised, definition unchanged
+
+Per CLAUDE.md ("do not refactor or improve the metric definitions to be
+more elegant... Do tell me when an implementation detail is wrong") and
+this session's own instruction to optimise the implementation only: the
+O(n²) naive per-window rescan (iterating the full boundary set for every
+sliding-window position) is replaced with an O(n) incremental scan that
+updates each side's in-window boundary count by one set-membership check
+per position entering/leaving the window, rather than rescanning the
+whole boundary set each time.
+
+**Equivalence, not just speed.** `tests/test_window_diff_speed.py` keeps
+a verbatim copy of the previous implementation (`_window_diff_naive`,
+never touched again after being copied out) and checks the new
+`metrics.window_diff` returns bit-identical values against it: 10,000
+random (ref, hyp) mass pairs with `n_tokens` spanning this corpus's own
+observed document-length range (1,824-6,628 words, reports/
+phase2_per_file_stats.csv) and boundary density varied across each pair
+(uniform in [0.03, 0.4], not just this corpus's own ~1/5 mean), plus 20
+small-n cases run on every test invocation as a fast regression guard.
+The corpus-scale 10,000-pair proof takes on the order of tens of minutes
+(naive) and is gated behind `RUN_SLOW_TESTS=1`, not run by default, per
+the same "run once per corpus-affecting change" policy §10 already
+applies to the baseline run itself.
+
+**Result: exact match on all 10,000 corpus-scale pairs (PASSED).** Total
+wall time for the 10,000-pair run: 2,911.9s (~48.5 min) for the naive
+implementation vs. 10.8s for the optimised one -- **269.6x**. (A single
+isolated call at n=6,628, this corpus's longest file: ~0.58s -> ~0.0017s,
+~340x -- close to, not identical to, the aggregate 269.6x, since the
+10,000-pair run spans the full corpus length range and a mix of boundary
+densities, not one fixed size.) The corpus-wide baseline run
+(`sbcsae_baselines.py`, §10), which scores window_diff twice per random
+draw x 100 draws x 59 files, dropped from "slowest script in the
+pipeline, on the order of a minute per file" (order of an hour total) to
+42.7s total -- confirmed by rerunning it and diffing the output against
+the previously committed
+`reports/phase2_baselines_per_file.csv`/`reports/phase2_baselines.md`:
+byte-identical.
+
+## 13. Long jobs write progress as they go, not only at the end
+
+**Decision.** `sbcsae_baselines.py`'s corpus-wide run now opens its
+output CSV once, writes the header, and writes + flushes one row
+immediately after each file's baselines are computed, instead of
+accumulating all 59 rows in memory and writing them only after the last
+file finishes. A run that is killed partway, or just being watched,
+shows real, already-computed results on disk for every file processed so
+far, not nothing until the very end. The markdown summary
+(`write_report`) still needs the complete set and is written once at the
+end, since it is a genuine final aggregate, not a per-file row -- the
+per-row streaming applies to the CSV, not the summary that depends on
+every row existing.
+
+The same principle applies to the corpus-wide LLM segmentation runner
+once it is written (reports/phase2_pilot.md's "Next" section) -- a
+59-file run making real API calls is exactly the kind of long job this
+matters most for, and should stream one file's row to disk as soon as
+that file's samples are scored, not buffer the whole corpus in memory
+until the run completes or fails.

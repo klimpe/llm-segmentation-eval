@@ -7,5 +7,6 @@ llm_output_fewshot/
 llm_output_temp_resample/
 llm_output_fewshot_temp_resample/
 llm_output_sbcsae/
+llm_output_sbcsae_rerun_b/
 .env
 reports/private/

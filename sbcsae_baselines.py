@@ -248,44 +248,64 @@ def write_report(per_file: list[dict], path: Path) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+CSV_HEADER = [
+    "file", "n_tokens",
+    "cue_rule_within_turn_f1", "cue_rule_all_boundaries_f1",
+    "random_within_turn_f1_mean", "random_within_turn_f1_lo", "random_within_turn_f1_hi",
+    "random_all_boundaries_f1_mean", "random_all_boundaries_f1_lo", "random_all_boundaries_f1_hi",
+]
+
+
+def _csv_row(row: dict) -> list[str]:
+    cue = row["cue_rule"]
+    rnd = row["random"]
+    wt_m, wt_lo, wt_hi = rnd["within_turn"]["f1"]
+    ab_m, ab_lo, ab_hi = rnd["all_boundaries"]["f1"]
+    return [
+        row["doc_id"], row["n_tokens"],
+        f"{cue['within_turn']['f1']:.4f}", f"{cue['all_boundaries']['f1']:.4f}",
+        f"{wt_m:.4f}", f"{wt_lo:.4f}", f"{wt_hi:.4f}",
+        f"{ab_m:.4f}", f"{ab_lo:.4f}", f"{ab_hi:.4f}",
+    ]
+
+
 def main():
     rng = random.Random(RANDOM_SEED)
 
-    # SBC039 first (the pilot file), then the rest of the corpus in file order.
-    sbc039_path = CORPUS_DIR / "SBC039.trn"
-    _, sbc039_units, *_ = read_trn_document(sbc039_path)
-    per_file = [per_file_baselines("SBC039", sbc039_units, rng)]
-
-    for doc_id, units, *_ in iter_trn_documents():
-        if doc_id in EXCLUDE_FILES or doc_id == "SBC039":
-            continue
-        per_file.append(per_file_baselines(doc_id, units, rng))
-
     reports_dir = Path("reports")
     reports_dir.mkdir(exist_ok=True)
+    per_file = []
+
+    # One row written and flushed to disk per file, as it is computed --
+    # not accumulated and written only at the end. This is a ~59-file,
+    # whole-corpus run with a 100-draw random baseline per file
+    # (previously "the slowest script in the pipeline", reports/
+    # phase2_baselines.md's own docstring); buffering every row until the
+    # last file means a run killed partway (or just watched) shows
+    # nothing on disk for files already computed. The markdown summary
+    # (write_report) still needs the complete list and is written once at
+    # the end, since it is a genuine final aggregate, not a per-file row.
     with open(reports_dir / "phase2_baselines_per_file.csv", "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
-        w.writerow(
-            [
-                "file", "n_tokens",
-                "cue_rule_within_turn_f1", "cue_rule_all_boundaries_f1",
-                "random_within_turn_f1_mean", "random_within_turn_f1_lo", "random_within_turn_f1_hi",
-                "random_all_boundaries_f1_mean", "random_all_boundaries_f1_lo", "random_all_boundaries_f1_hi",
-            ]
+        w.writerow(CSV_HEADER)
+        f.flush()
+
+        # SBC039 first (the pilot file), then the rest of the corpus in file order.
+        sbc039_path = CORPUS_DIR / "SBC039.trn"
+        _, sbc039_units, *_ = read_trn_document(sbc039_path)
+        docs = [("SBC039", sbc039_units)]
+        docs.extend(
+            (doc_id, units)
+            for doc_id, units, *_ in iter_trn_documents()
+            if doc_id not in EXCLUDE_FILES and doc_id != "SBC039"
         )
-        for row in per_file:
-            cue = row["cue_rule"]
-            rnd = row["random"]
-            wt_m, wt_lo, wt_hi = rnd["within_turn"]["f1"]
-            ab_m, ab_lo, ab_hi = rnd["all_boundaries"]["f1"]
-            w.writerow(
-                [
-                    row["doc_id"], row["n_tokens"],
-                    f"{cue['within_turn']['f1']:.4f}", f"{cue['all_boundaries']['f1']:.4f}",
-                    f"{wt_m:.4f}", f"{wt_lo:.4f}", f"{wt_hi:.4f}",
-                    f"{ab_m:.4f}", f"{ab_lo:.4f}", f"{ab_hi:.4f}",
-                ]
-            )
+
+        for doc_id, units in docs:
+            row = per_file_baselines(doc_id, units, rng)
+            per_file.append(row)
+            w.writerow(_csv_row(row))
+            f.flush()
+            print(f"  {doc_id}: cue rule within_turn F1 {row['cue_rule']['within_turn']['f1']:.4f}")
 
     write_report(per_file, reports_dir / "phase2_baselines.md")
     print(f"Wrote reports/phase2_baselines_per_file.csv and reports/phase2_baselines.md ({len(per_file)} files)")

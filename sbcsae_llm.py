@@ -274,6 +274,11 @@ Every turn's first word already begins a new intonation unit -- do not \
 report it. Report only the positions of words, strictly inside a turn \
 (never a turn's own first word), at which a new intonation unit begins.
 
+A reported position is always the first word of the new intonation \
+unit -- never the last word of the one before it. For example, in \
+"SPEAKER: 12:we 13:went 14:down 15:to 16:the 17:store", if a new \
+intonation unit begins at "down", report 14, not 13.
+
 Respond with nothing but a JSON array of the 1-indexed positions where a \
 new intonation unit begins inside a turn, e.g. [4, 9, 15]. No other \
 text, no markdown fences.

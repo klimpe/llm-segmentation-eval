@@ -68,8 +68,10 @@ class WindowDraw:
     used_cache: bool = False
 
 
-def _cache_path(doc_id: str, condition: Condition, window_idx: int, sample_idx: int) -> Path:
-    return OUTPUT_DIR / f"{doc_id}_{condition.value}_w{window_idx}_sample{sample_idx}.txt"
+def _cache_path(
+    doc_id: str, condition: Condition, window_idx: int, sample_idx: int, output_dir: Path = OUTPUT_DIR
+) -> Path:
+    return output_dir / f"{doc_id}_{condition.value}_w{window_idx}_sample{sample_idx}.txt"
 
 
 def _parse_window_response(raw_output: str, region: ScoreRegion, turn_boundaries: set[int]) -> tuple[list[int], list[int]]:
@@ -95,8 +97,9 @@ def _draw_one_window(
     prompt: str,
     region: ScoreRegion,
     turn_boundaries: set[int],
+    output_dir: Path = OUTPUT_DIR,
 ) -> WindowDraw:
-    path = _cache_path(doc_id, condition, window_idx, sample_idx)
+    path = _cache_path(doc_id, condition, window_idx, sample_idx, output_dir)
     if path.exists():
         cached = path.read_text(encoding="utf-8")
         try:
@@ -177,8 +180,13 @@ def _local_region_inputs(doc, region: ScoreRegion):
     return local_ref_masses, local_turn_boundaries, lo
 
 
-def run_pilot(doc_id: str = DOC_ID, n_samples: int = N_SAMPLES) -> dict:
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+def run_pilot(
+    doc_id: str = DOC_ID,
+    n_samples: int = N_SAMPLES,
+    conditions: tuple[Condition, ...] = (Condition.A, Condition.B),
+    output_dir: Path = OUTPUT_DIR,
+) -> dict:
+    output_dir.mkdir(parents=True, exist_ok=True)
     path = CORPUS_DIR / f"{doc_id}.trn"
     real_doc_id, units, *_ = read_trn_document(path)
     doc = build_document_structure(real_doc_id, units)
@@ -188,15 +196,15 @@ def run_pilot(doc_id: str = DOC_ID, n_samples: int = N_SAMPLES) -> dict:
     assert_boundaries_each_in_one_region(regions, masses_to_boundaries(doc.ref_masses), doc.n_tokens)
 
     # draws[condition][sample_idx][window_idx] = WindowDraw
-    draws: dict = {c: [[None] * len(regions) for _ in range(n_samples)] for c in (Condition.A, Condition.B)}
+    draws: dict = {c: [[None] * len(regions) for _ in range(n_samples)] for c in conditions}
 
-    for condition in (Condition.A, Condition.B):
+    for condition in conditions:
         for window_idx, region in enumerate(regions):
             window_text = render_window(doc, region.window_start, region.window_end, condition)
             prompt = build_prompt(window_text, condition)
             for sample_idx in range(n_samples):
                 draws[condition][sample_idx][window_idx] = _draw_one_window(
-                    doc_id, condition, window_idx, sample_idx, prompt, region, doc.turn_boundaries
+                    doc_id, condition, window_idx, sample_idx, prompt, region, doc.turn_boundaries, output_dir
                 )
 
     return {"doc": doc, "regions": regions, "draws": draws, "n_samples": n_samples, "units": units}
@@ -281,7 +289,7 @@ def analyse(pilot: dict) -> dict:
     if "units" in pilot:
         result["window_reference_stats"] = compute_window_reference_stats(doc, pilot["units"], regions)
 
-    for condition in (Condition.A, Condition.B):
+    for condition in draws:
         cond_key = condition.value
         cdraws = draws[condition]
 
