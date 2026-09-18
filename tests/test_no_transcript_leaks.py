@@ -36,7 +36,7 @@ ALLOWED_COLUMNS = {
     "reports/phase2_batch1_scores.csv": {
         "doc_id", "condition", "sample", "scope", "precision", "recall", "f1", "window_diff",
         "boundary_similarity", "hyp_ref_ratio", "n_ref_boundaries", "n_hyp_boundaries", "flagged",
-        "collapse_rate", "share_words_in_runs",
+        "collapse_rate", "share_words_in_runs", "total_window_draws",
     },
     "reports/phase2_batch1_offsets.csv": {
         "doc_id", "condition", "sample", "offset", "count", "cue_after_named_word_count",

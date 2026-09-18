@@ -192,7 +192,11 @@ def _write_scores_rows(writer, doc_id: str, analysis: dict, collapse_stats: dict
                         # reports/phase2_llm_design.md S14) -- a file+condition-level
                         # constant repeated on every one of that pair's rows, next to
                         # F1, since F1 alone barely moves when a collapse happens.
+                        # total_window_draws is repeated the same way -- it lets the
+                        # report's single aggregate old-vs-new-rule note (write_report)
+                        # be computed from the CSVs alone, with no other source.
                         f"{cs['collapse_rate']:.4f}", f"{cs['share_words_in_runs']:.4f}",
+                        cs["total_window_draws"],
                     ]
                 )
 
@@ -268,7 +272,7 @@ def run_batch(
         w_scores.writerow(
             ["doc_id", "condition", "sample", "scope", "precision", "recall", "f1", "window_diff",
              "boundary_similarity", "hyp_ref_ratio", "n_ref_boundaries", "n_hyp_boundaries", "flagged",
-             "collapse_rate", "share_words_in_runs"]
+             "collapse_rate", "share_words_in_runs", "total_window_draws"]
         )
         w_offsets = csv.writer(f_offsets)
         w_offsets.writerow(["doc_id", "condition", "sample", "offset", "count", "cue_after_named_word_count"])
@@ -375,6 +379,40 @@ def write_report(batch: list[dict], path: Path = Path("reports/phase2_batch1.md"
         "Every figure below is read from reports/phase2_batch1_scores.csv, "
         "_offsets.csv, _degenerate.csv and _baselines.csv -- nothing here comes from "
         "an in-memory number those files don't also contain."
+    )
+    lines.append("")
+
+    # -- Old-vs-new degeneracy rule, stated ONCE, in aggregate (reports/
+    # phase2_llm_design.md S14 found the whole-corpus rule (run > 22)
+    # undercounting collapse by roughly 6x on a partial batch; this is
+    # the same comparison, recomputed over the completed 10-file batch).
+    # Every per-file/per-condition section below still shows both rules'
+    # verdict side by side on its own runs -- that is the underlying
+    # data, not a repetition of this aggregate claim.
+    batch_doc_ids_for_note = [b["doc_id"] for b in batch if not b["is_pilot"]]
+    batch_scores_for_note = [r for r in scores if r["doc_id"] in batch_doc_ids_for_note]
+    seen_file_cond = set()
+    total_draws_note = 0
+    for r in batch_scores_for_note:
+        key = (r["doc_id"], r["condition"])
+        if key not in seen_file_cond:
+            seen_file_cond.add(key)
+            total_draws_note += int(r["total_window_draws"])
+    n_old_flagged = sum(
+        1 for r in degenerate if r["doc_id"] in batch_doc_ids_for_note and r["old_auto_flagged"] == "True"
+    )
+    n_new_flagged = sum(
+        1 for r in degenerate if r["doc_id"] in batch_doc_ids_for_note and r["new_degenerate"] == "True"
+    )
+    ratio = n_new_flagged / n_old_flagged if n_old_flagged else float("inf")
+    lines.append(
+        f"**Old rule (whole-corpus, run > 22) vs new rule (per-file, "
+        f"reports/phase2_llm_design.md S14), over the full 10-file batch's "
+        f"{total_draws_note} window-draws: {n_old_flagged} flagged by the old rule vs "
+        f"{n_new_flagged} by the new one -- the old rule undercounts collapse by "
+        f"roughly {ratio:.0f}x. Stated once, here; every table below reports "
+        f"collapse_rate/share_words_in_runs under the new rule only, and cites the old "
+        f"rule's own verdict per-draw only where relevant.**"
     )
     lines.append("")
 
@@ -532,49 +570,166 @@ def write_report(batch: list[dict], path: Path = Path("reports/phase2_batch1.md"
     _per_file_metric_table(batch_doc_ids, "Per-file results (10-file batch)")
     _per_file_metric_table(pilot_doc_ids, "SBC039 (pilot file, reported separately)")
 
-    lines.append("## A vs. B: per-file difference (batch files only, not the pilot)")
+    lines.append("## A vs. B: per-file comparison, within-turn scope (batch files only, not the pilot)")
     lines.append("")
     lines.append(
-        "Per-file within-turn F1 difference (B mean minus A mean, over non-flagged "
-        "samples), and its range across the 10 batch files. No aggregate significance "
-        "claim is made on 10 files -- CLAUDE.md's own standing caution applies."
+        "Every metric below is a per-file mean over that file+condition's non-flagged "
+        "samples (within-turn scope), plus collapse_rate under the new per-file rule "
+        "(S14 above). This is a per-file table, not an aggregate: no cross-file mean, "
+        "pooled score, or significance claim is made on 10 files -- CLAUDE.md's own "
+        "standing caution applies. 'B beats A' on collapse_rate means B's rate is the "
+        "LOWER of the two (fewer degenerate draws), the opposite direction from the "
+        "other metrics where higher is better."
     )
     lines.append("")
-    lines.append("| doc_id | A within_turn F1 mean | B within_turn F1 mean | B - A |")
-    lines.append("|---|---|---|---|")
-    diffs = []
-    b_wins = 0
+
+    def _within_turn_mean(doc_id, cond_key, metric):
+        vals = [float(r[metric]) for r in _scores_for(doc_id, cond_key, "within_turn") if r[metric] != ""]
+        return mean(vals) if vals else float("nan")
+
+    def _collapse_rate_for(doc_id, cond_key):
+        any_rows = [r for r in scores if r["doc_id"] == doc_id and r["condition"] == cond_key]
+        return float(any_rows[0]["collapse_rate"]) if any_rows else float("nan")
+
+    comparison_metrics = ["precision", "recall", "f1", "window_diff", "boundary_similarity", "hyp_ref_ratio"]
+    header_cells = ["doc_id"]
+    for m in comparison_metrics:
+        header_cells += [f"A {m}", f"B {m}"]
+    header_cells += ["A collapse_rate", "B collapse_rate"]
+    lines.append("| " + " | ".join(header_cells) + " |")
+    lines.append("|" + "---|" * len(header_cells))
+
+    f1_diffs = []
+    f1_b_wins = 0
+    f1_comparable = 0
+    f1_nan_files = []
+    collapse_diffs = []
+    collapse_b_wins = 0
     for doc_id in batch_doc_ids:
-        a_vals = [float(r["f1"]) for r in _scores_for(doc_id, "A", "within_turn")]
-        b_vals = [float(r["f1"]) for r in _scores_for(doc_id, "B", "within_turn")]
-        a_m = mean(a_vals) if a_vals else float("nan")
-        b_m = mean(b_vals) if b_vals else float("nan")
-        diff = b_m - a_m
-        diffs.append(diff)
-        if diff > 0:
-            b_wins += 1
-        lines.append(f"| {doc_id} | {a_m:.4f} | {b_m:.4f} | {diff:+.4f} |")
+        row_cells = [doc_id]
+        per_metric_vals = {}
+        for m in comparison_metrics:
+            a_v = _within_turn_mean(doc_id, "A", m)
+            b_v = _within_turn_mean(doc_id, "B", m)
+            per_metric_vals[m] = (a_v, b_v)
+            row_cells += [f"{a_v:.4f}", f"{b_v:.4f}"]
+        a_cr = _collapse_rate_for(doc_id, "A")
+        b_cr = _collapse_rate_for(doc_id, "B")
+        row_cells += [f"{a_cr:.4f}", f"{b_cr:.4f}"]
+        lines.append("| " + " | ".join(row_cells) + " |")
+
+        a_f1, b_f1 = per_metric_vals["f1"]
+        if a_f1 != a_f1:  # nan check: this file+condition had 0 non-flagged samples
+            f1_nan_files.append(doc_id)
+        else:
+            f1_comparable += 1
+            f1_diff = b_f1 - a_f1
+            f1_diffs.append((doc_id, f1_diff))
+            if f1_diff > 0:
+                f1_b_wins += 1
+        collapse_diff = b_cr - a_cr  # negative means B collapses less -- a B win
+        collapse_diffs.append((doc_id, collapse_diff))
+        if collapse_diff < 0:
+            collapse_b_wins += 1
     lines.append("")
-    if diffs:
-        lines.append(
-            f"B beats A (within_turn F1) on {b_wins} of {len(diffs)} files. "
-            f"Per-file difference range: [{min(diffs):+.4f}, {max(diffs):+.4f}], "
-            f"mean {mean(diffs):+.4f}. This is a per-file count and range, not a "
-            f"significance test -- 10 files do not support one."
+    lines.append(
+        f"B beats A on within_turn F1 on {f1_b_wins} of {f1_comparable} files with a valid A "
+        f"score ({', '.join(d for d, diff in f1_diffs if diff > 0) or 'none'})."
+        + (
+            f" {', '.join(f1_nan_files)} excluded: condition A had 0 non-flagged samples there "
+            f"(all auto-flagged degenerate -- see its own section above), so no A score exists "
+            f"to compare."
+            if f1_nan_files
+            else ""
         )
+    )
+    lines.append(
+        f"B beats A on collapse_rate (lower = fewer degenerate draws) on {collapse_b_wins} of "
+        f"{len(batch_doc_ids)} files ({', '.join(d for d, diff in collapse_diffs if diff < 0) or 'none'})."
+    )
+    lines.append(
+        "These are per-file counts, not a significance test or a pooled claim -- 10 files "
+        "do not support one."
+    )
     lines.append("")
 
-    lines.append("## Baselines (cue rule and density-matched random), same files")
+    lines.append("## Baselines (cue rule and density-matched random), within-turn scope, same 10 batch files")
     lines.append("")
-    lines.append("| doc_id | scope | baseline | precision | recall | f1 | window_diff | boundary_similarity |")
-    lines.append("|---|---|---|---|---|---|---|---|")
-    for doc_id in doc_ids:
-        for r in [r for r in baselines if r["doc_id"] == doc_id]:
-            label = "**within_turn**" if r["scope"] == "within_turn" else r["scope"]
-            lines.append(
-                f"| {doc_id} | {label} | {r['baseline']} | {r['precision']} | {r['recall']} | "
-                f"{r['f1']} | {r['window_diff']} | {r['boundary_similarity']} |"
-            )
+    lines.append(
+        "Same per-file table structure as the A vs. B comparison above, for the cue rule "
+        "(deterministic: boundary wherever a prosodic cue was rendered) and the density-"
+        "matched random baseline, on the same 10 batch files (pilot excluded, matching the "
+        "A vs. B section). Baselines are deterministic/resampled from text alone, not "
+        "per-sample model draws, so there is no collapse_rate column here."
+    )
+    lines.append("")
+
+    def _baseline_metric(doc_id, baseline_name, metric):
+        rows = [r for r in baselines if r["doc_id"] == doc_id and r["scope"] == "within_turn" and r["baseline"] == baseline_name]
+        return float(rows[0][metric]) if rows else float("nan")
+
+    baseline_metrics = ["precision", "recall", "f1", "window_diff", "boundary_similarity"]
+    bl_header = ["doc_id"]
+    for m in baseline_metrics:
+        bl_header += [f"cue_rule {m}", f"random {m}"]
+    lines.append("| " + " | ".join(bl_header) + " |")
+    lines.append("|" + "---|" * len(bl_header))
+    for doc_id in batch_doc_ids:
+        row_cells = [doc_id]
+        for m in baseline_metrics:
+            row_cells += [f"{_baseline_metric(doc_id, 'cue_rule', m):.4f}", f"{_baseline_metric(doc_id, 'random', m):.4f}"]
+        lines.append("| " + " | ".join(row_cells) + " |")
+    lines.append("")
+
+    lines.append("### Where the model stands against the cue rule, file by file (within-turn F1)")
+    lines.append("")
+    lines.append(
+        "The cue rule is not a naive baseline: it has direct access to the same prosodic "
+        "cues condition B renders, applied deterministically (boundary after every cue), so "
+        "it is a natural ceiling-ish comparison for B specifically, not just a floor. "
+        "Condition A never sees cues at all, so its comparison to the cue rule tests "
+        "something different (can text alone recover what the cue rule gets from prosodic "
+        "markup) and is reported alongside, not instead."
+    )
+    lines.append("")
+    lines.append("| doc_id | cue_rule F1 | A F1 | A vs. cue_rule | B F1 | B vs. cue_rule |")
+    lines.append("|---|---|---|---|---|---|")
+
+    def _verdict_cell(model_f1, cue_f1):
+        # A file+condition with zero non-flagged samples (every sample
+        # auto-flagged degenerate, e.g. SBC044 condition A below) has no
+        # valid F1 to compare -- nan, not a loss: reported as its own
+        # category, not folded silently into "loses to".
+        if model_f1 != model_f1:  # nan check, no math import needed
+            return "n/a (all samples auto-flagged)", None
+        verdict = "beats" if model_f1 > cue_f1 else "loses to"
+        return f"{verdict} ({model_f1 - cue_f1:+.4f})", model_f1 > cue_f1
+
+    a_beats_cue = 0
+    a_comparable = 0
+    b_beats_cue = 0
+    b_comparable = 0
+    for doc_id in batch_doc_ids:
+        cue_f1 = _baseline_metric(doc_id, "cue_rule", "f1")
+        a_f1 = _within_turn_mean(doc_id, "A", "f1")
+        b_f1 = _within_turn_mean(doc_id, "B", "f1")
+        a_cell, a_win = _verdict_cell(a_f1, cue_f1)
+        b_cell, b_win = _verdict_cell(b_f1, cue_f1)
+        if a_win is not None:
+            a_comparable += 1
+            a_beats_cue += int(a_win)
+        if b_win is not None:
+            b_comparable += 1
+            b_beats_cue += int(b_win)
+        a_f1_cell = "nan" if a_f1 != a_f1 else f"{a_f1:.4f}"
+        lines.append(f"| {doc_id} | {cue_f1:.4f} | {a_f1_cell} | {a_cell} | {b_f1:.4f} | {b_cell} |")
+    lines.append("")
+    lines.append(
+        f"Condition A beats the cue rule on within_turn F1 on {a_beats_cue} of {a_comparable} "
+        f"files with a valid (non-degenerate-only) score. Condition B beats the cue rule on "
+        f"{b_beats_cue} of {b_comparable}. Per-file counts only -- no aggregate or significance "
+        f"claim on 10 files."
+    )
     lines.append("")
 
     path.parent.mkdir(parents=True, exist_ok=True)
