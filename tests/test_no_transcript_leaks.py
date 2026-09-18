@@ -27,6 +27,12 @@ ALLOWED_EXCEPTION_REASONS = {"dubois_dollar_note", "backslash_fused", "ambiguous
 # update this table in the same commit as an explicit decision, not as a
 # side effect of a rerun.
 ALLOWED_COLUMNS = {
+    "reports/phase2_baselines_per_file.csv": {
+        "file", "n_tokens",
+        "cue_rule_within_turn_f1", "cue_rule_all_boundaries_f1",
+        "random_within_turn_f1_mean", "random_within_turn_f1_lo", "random_within_turn_f1_hi",
+        "random_all_boundaries_f1_mean", "random_all_boundaries_f1_lo", "random_all_boundaries_f1_hi",
+    },
     "reports/phase2_capitalization.csv": {"category", "label", "n_words", "n_capitalised", "share_capitalised"},
     "reports/phase2_capitalization_by_file.csv": {
         "file",

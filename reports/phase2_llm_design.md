@@ -182,33 +182,37 @@ window of every file (59, `SBC037` excluded) under condition B and
 checks every symbol — standalone or embedded — is one of
 `GLOSSARY_SYMBOLS`. This is a whole-corpus regression, not a spot check.
 
-**Found along the way, not asked for, not fixed here: a reader defect.**
-4 of 59 files (`SBC027`, `SBC055`, `SBC059`, `SBC060`) have a raw `.trn`
-line with two tabs immediately after the timestamps and nothing between
-them. `sbcsae_reader._HEAD_RE`'s `rest` group is captured after a greedy
-`\s*`, which swallows both tabs as one gap, so `split_line_fields`'s
-"content before the first remaining tab is the speaker" rule (needed for
-real colon-less codes like `MONTOYA`) wrongly takes the actual IU text as
-the speaker and leaves the text field empty — corrupting that IU's
-speaker, and, since an empty `speaker_field` does not update
-`current_speaker`, every following same-run IU until the next
-well-formed speaker field too. 9 IUs directly affected across the 4
-files (some number more indirectly, not yet quantified). Excluded from
-`test_cue_glossary_coverage.py` by name, with the investigation recorded
-in the test's own comment, rather than silently skipped. Two
-superficially similar cases — `SBC052`'s `~Janine` and `SBC056`'s
-`@@@2]` — are NOT this bug: both are pre-existing, already-documented
-real speaker-field content and were left untouched.
+**Found along the way this session, fixed a later session: a reader
+defect.** 4 of 59 files (`SBC027`, `SBC055`, `SBC059`, `SBC060`) have a
+raw `.trn` line with two tabs immediately after the timestamps and
+nothing between them. `sbcsae_reader._HEAD_RE`'s `rest` group is
+captured after a greedy `\s*`, which swallows both tabs as one gap, so
+`split_line_fields`'s "content before the first remaining tab is the
+speaker" rule (needed for real colon-less codes like `MONTOYA`) wrongly
+took the actual IU text as the speaker and left the text field empty (or,
+for `SBC055`, truncated) — corrupting that IU's speaker, and, since an
+empty `speaker_field` does not update `current_speaker`, every following
+same-run IU until the next well-formed speaker field too. 9 IUs directly
+affected across the 4 files. Two superficially identical cases —
+`SBC052`'s `~Janine` and `SBC056`'s `@@@2]` — are NOT this bug: nothing
+in the raw line's structure tells them apart from the real defect, only
+content does (there the field before the surviving tab really is the
+speaker code), so the fix could not be a general rule.
 
-CLAUDE.md marks the reader "settled... do not revisit without new
-evidence" — this is that evidence, but fixing `sbcsae_reader.py` is out
-of scope for this session (not one of the steps asked for, and it would
-touch every downstream figure that depends on speaker assignment, e.g.
-the per-file speaker-change counts in
-`reports/phase2_per_file_stats.csv`). The pilot (step 4, next) uses only
-`SBC039`, which is not one of the 4 affected files, so this does not
-block it. Flagged here for a decision before phase 2 scales past the
-pilot, not silently patched or silently ignored.
+**Fixed.** `sbcsae_reader.py`'s `KNOWN_EMPTY_SPEAKER_STRAY_TAB` names the
+exact 4 (file, line) pairs and reparses only those, joining every
+non-blank field after the empty speaker with a single space (a no-op for
+3 of the 4, which have exactly one real field; `SBC055`'s stray tab sits
+mid-sentence, splitting what reads as one continuous utterance) — a
+named, line-anchored exception in the same style as
+`CROSS_SPEAKER_AMPERSAND` above, not a general regex change, since
+`SBC052`/`SBC056` are structurally identical to the bug and must not be
+touched. Confirmed against the whole corpus: exactly these 4 files'
+output changes (9 IUs), the 70,083-to-69,772 derivation still holds term
+by term, and every tokeniser/invariant check still passes. The
+`test_cue_glossary_coverage.py` by-name exclusion for these 4 files has
+been removed — the whole-corpus glossary-coverage check now covers them
+like every other file and still passes.
 
 ## 6. Prompt wording: no claim untrue of any file
 
@@ -238,3 +242,120 @@ core / 100-word margin, `sbcsae_windows.py`) x condition {A, B} x
 `n_samples=5`. Raw output persisted per (condition, window, sample) under
 the gitignored `llm_output_sbcsae/` (real transcript-derived content, per
 the licence). See `reports/phase2_pilot.md` for the run itself.
+
+## 8. Degenerate-run detection: basis check and aggregate exclusion
+
+**Basis check.** `sbcsae_pilot.analyse`'s degenerate-run detector counts
+runs over `d.kept` — within-turn hypothesis indices only, since
+`_parse_window_response` already drops any turn-initial index the model
+returned before `kept` is ever populated. Confirmed empirically against
+the pilot's own two flagged draws (sample 0/window 1, run 15; sample
+3/window 5, run 26): neither run's span contains a turn boundary, so the
+run-length count already matches `sbcsae_degenerate_threshold.py`'s own
+basis for `MAX_LEGITIMATE_RUN`/`DEGENERATE_FLAG_THRESHOLD` (within-turn
+reference boundaries only, turn boundaries excluded by construction, not
+by coincidence). No fix was needed.
+
+Both flagged runs were read in full (indices, rendered text, reference
+boundaries): each marks a new intonation unit at literally every word for
+15–26 consecutive words, matching only 3–4 real reference boundaries over
+that span — enumeration, not a plausible segmentation, in both cases.
+
+**Aggregate exclusion.** CLAUDE.md's "Degenerate output" section requires
+flagged draws to be reported separately, not folded into the aggregate —
+previously recorded as a policy but not actually wired into
+`sbcsae_pilot.py`'s scoring. Now: any sample with an auto-flagged
+(run > 22) window is excluded from the whole-file score aggregate (mean/
+range) and reported in its own "Auto-flagged draws" table instead; the
+same exclusion applies per (sample, window) pair for the per-window score
+aggregate. A `needs_manual_review`-only run (11 < run ≤ 22, not
+auto-flagged) stays in the aggregate — that threshold exists to prompt a
+human reading, not to change what gets averaged (`reports/
+phase2_llm_design.md` §3's own two-threshold design). Every score dict is
+now tagged with its sample index (`scores["sample"]`) so a report can
+show which sample a row came from once exclusion means list position no
+longer equals sample number.
+
+## 9. Extended scoring: boundary-count ratio, offset distribution, position F1
+
+`sbcsae_scoring._compute_metrics` already called `boundary_precision_
+recall`, `boundary_f1`, `window_diff` and `boundary_similarity` from
+`metrics.py` (unchanged) for both scopes; the pilot report just wasn't
+showing precision/recall/boundary_similarity, only F1 and WindowDiff.
+Now shown for both scopes, per sample. One genuinely new figure was
+added, not present in `metrics.py`: `boundary_count_ratio` = |hyp
+boundaries| / |ref boundaries| (1.0 if both empty; `None`, not a
+division error, if the reference has none but the hypothesis does — no
+finite ratio describes that). A ratio > 1 means over-segmentation, < 1
+under-segmentation — cheap to read alongside F1, which alone does not
+say which direction an error leans.
+
+**Offset distribution.** For every within-turn hypothesis boundary
+(pooled over all non-flagged, successful draws, per condition): the
+signed distance, in tokens, to the nearest within-turn reference boundary
+(`sbcsae_pilot._nearest_signed_offset`, a simple bisect nearest-neighbour
+search over the document's sorted reference boundary set). Bucketed into
+-3..+3 plus a beyond-range tail. This answers a question F1 cannot: when
+the model is wrong, is it wrong by a little (near-miss, off by one or two
+words) or by a lot (a different segmentation decision entirely)?
+
+**Position-in-core F1.** Within-turn precision/recall/F1 pooled
+(micro-averaged tp/fp/fn, not a mean of per-window F1s) by fixed 200-word
+position inside each window's 600-word score core (1–200, 201–400,
+401–600 — literal word-count chunks, so a shorter final window's words
+all land in the first bucket rather than being rescaled to thirds). Bug
+caught while implementing this: the first version compared local
+1-indexed *start positions* directly against boundary ("after token p")
+positions without the same `i − 1` conversion `score_document` applies
+internally, which silently deflated every position-bucket F1 by roughly
+half; fixed by converting to boundary space before comparing, and
+verified by checking that summing the three buckets' pooled tp/fp/fn
+reproduces the same overall F1 as the existing (unbucketed) per-window
+scoring, sample by sample.
+
+## 10. No-model baselines: cue rule and density-matched random
+
+Per CLAUDE.md's own governing logic for the project (a score means little
+without something to compare it to) and the standing instruction to
+validate any new number against an external reference: two baselines,
+scored with the exact same `score_document` and window regions as the
+model, so they sit in the same tables (`sbcsae_baselines.py`,
+`reports/phase2_baselines.md`).
+
+**Cue rule (condition B only).** A boundary before every word
+immediately preceded — through any run of stacked cues — by a pause
+(`..`/`...`) or an in-breath (`(H)`): exactly the three cue kinds
+condition B keeps and condition A strips. Deterministic, one hypothesis
+per file, not resampled. On the pilot file this rule alone reaches a
+within-turn F1 in the same range as the model's own mean — a useful
+ceiling-side sanity check: some of what looks like the model "using"
+prosodic cues may be reachable by the cue's mere presence, not real
+integration of cue and lexical/syntactic content.
+
+**Random (both condition labels — the draw itself never looks at cues,
+so "A" and "B" differ only in which independent set of 100 draws was
+taken).** Per window, per draw: as many within-turn boundary positions as
+the reference has in that window, chosen uniformly at random without
+replacement from the window's own valid candidate positions (turn
+boundaries excluded — never a legitimate prediction). Density-matched
+per window, not once for the whole document, so a high-IU-density window
+draws proportionally more random boundaries than a low-density one, the
+same way the reference itself varies. 100 draws, `n=100` mean and range,
+per CLAUDE.md's "Sampling" section — never a single draw, even for a
+baseline cheap enough to run many more times than that.
+
+Both baselines run on `SBC039` and on all 59 files (`SBC037` excluded),
+per file and overall — a full corpus-wide per-file table is allowed here,
+unlike for a real model run, specifically because no model call is
+involved (CLAUDE.md's per-subset-breakdown rule is about not hiding
+per-subset problems behind an aggregate, not about table size). Overall
+figures are a macro mean across files with the across-file range shown
+alongside, not a single pooled number, for the same reason.
+
+`window_diff` (from `metrics.py`, unchanged) is O(n²) in its naive
+sliding-window implementation; scoring 100 random draws per file at
+whole-document length made the corpus-wide run the slowest script in the
+pipeline (on the order of a minute per file). Left as is: `metrics.py` is
+explicitly out of scope for "improvement" (CLAUDE.md, "What not to do"),
+and the run only needs to happen once per corpus-affecting change, not
+per model call.

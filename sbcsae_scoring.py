@@ -42,12 +42,26 @@ NON_COMPARABILITY_NOTE = (
 
 def _compute_metrics(ref_masses: list[int], hyp_masses: list[int]) -> dict:
     precision, recall = boundary_precision_recall(ref_masses, hyp_masses)
+    ref_b = masses_to_boundaries(ref_masses)
+    hyp_b = masses_to_boundaries(hyp_masses)
+    # Hypothesis/reference boundary-count ratio: >1 means the hypothesis
+    # over-segments relative to the reference, <1 under-segments. Not one
+    # of metrics.py's published metrics (nothing to keep "unchanged" here)
+    # -- a plain count ratio, added directly. 1.0 when both sides are
+    # empty (perfect agreement on "no boundaries"); undefined (None) if
+    # the reference has none but the hypothesis does, since no finite
+    # ratio describes that.
+    if ref_b:
+        boundary_count_ratio = len(hyp_b) / len(ref_b)
+    else:
+        boundary_count_ratio = 1.0 if not hyp_b else None
     return {
         "precision": precision,
         "recall": recall,
         "f1": boundary_f1(ref_masses, hyp_masses),
         "window_diff": window_diff(ref_masses, hyp_masses),
         "boundary_similarity": boundary_similarity(ref_masses, hyp_masses),
+        "boundary_count_ratio": boundary_count_ratio,
     }
 
 

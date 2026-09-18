@@ -126,8 +126,35 @@ class AmbiguousFieldsError(ValueError):
 
 _SPEAKER_RE = re.compile(r"^([#>*]?[A-Za-z][A-Za-z0-9_]*):\s*")
 
+# SBC027 line 94, SBC055 line 200, SBC059 line 1710, SBC060 line 43: the
+# only 4 lines in the corpus with two tabs immediately after the
+# timestamps and nothing between them (an empty speaker field) where the
+# real text that follows itself contains a further stray tab -- trailing,
+# in three cases (a spreadsheet-save artifact); embedded mid-sentence in
+# SBC055's ("And in spite ..<TAB>of having .. this feeling..."), most
+# likely a space fat-fingered as a tab. _HEAD_RE's `rest` group is
+# captured after a greedy `\s*`, which swallows both structural tabs as
+# one gap, so the ordinary "content before the first remaining tab is the
+# speaker" rule (needed for real colon-less codes like MONTOYA) wrongly
+# took the real IU text as the speaker and left text empty (or, for
+# SBC055, truncated to the second half only). Two superficially identical
+# shapes -- SBC052's "~Janine" and SBC056's "@@@2]" -- are NOT this bug:
+# there the field before the surviving tab really is the speaker code.
+# Nothing in the line's structure distinguishes the two shapes -- only
+# content does -- so this is handled as a named, line-anchored fix,
+# exactly like CROSS_SPEAKER_AMPERSAND above: a further line of this
+# shape must raise, not be silently reinterpreted.
+KNOWN_EMPTY_SPEAKER_STRAY_TAB = {
+    ("SBC027", 94),
+    ("SBC055", 200),
+    ("SBC059", 1710),
+    ("SBC060", 43),
+}
 
-def split_line_fields(line: str) -> tuple[float, float, str, str]:
+
+def split_line_fields(
+    line: str, doc_id: str | None = None, line_no: int | None = None
+) -> tuple[float, float, str, str]:
     """Parse one non-blank .trn line into (start, end, speaker, text).
 
     One regex, applied the same way to every line: capture the two leading
@@ -163,11 +190,28 @@ def split_line_fields(line: str) -> tuple[float, float, str, str]:
     unlike the more permissive first-tab-content rule above, because
     without a tab there is no positional signal at all to fall back on if
     the colon rule doesn't fire.
+
+    `doc_id`/`line_no` are optional and only used to check the line
+    against KNOWN_EMPTY_SPEAKER_STRAY_TAB (a named, line-anchored fix for
+    a handful of lines the general rules above misparse identically to a
+    real colon-less speaker code); omit them to get the general rules
+    unconditionally, as every caller other than read_trn_document does.
     """
     m = _HEAD_RE.match(line)
     if not m:
         raise ValueError(f"line does not start with 'start end': {line!r}")
     start, end, rest = m.group(1), m.group(2), m.group(3)
+
+    if doc_id is not None and (doc_id, line_no) in KNOWN_EMPTY_SPEAKER_STRAY_TAB:
+        # The two structural tabs are already gone (swallowed into the
+        # gap before `rest`, like every other line) -- the speaker field
+        # they delimited was empty. Any further tab still inside `rest`
+        # is the stray artifact, not a second field boundary: join every
+        # non-blank piece with a single space (SBC055's only case with
+        # more than one) rather than picking one and discarding the rest.
+        sub_fields = rest.split("\t")
+        non_blank = [f.strip() for f in sub_fields if f.strip()]
+        return float(start), float(end), "", " ".join(non_blank)
 
     if "\t" in rest:
         speaker_part, _, text_part = rest.partition("\t")
@@ -272,7 +316,7 @@ def read_trn_document(path: Path) -> tuple[str, list[IntonationUnit], int, list[
             continue
 
         try:
-            start, end, speaker_field, raw_text = split_line_fields(raw_line)
+            start, end, speaker_field, raw_text = split_line_fields(raw_line, doc_id, line_no)
         except AmbiguousFieldsError:
             # Exactly one such line in the whole corpus (SBC016 line 1185):
             # a stray tab splits an overlap bracket from the rest of the

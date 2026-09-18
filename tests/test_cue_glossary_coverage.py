@@ -21,33 +21,6 @@ from sbcsae_windows import build_score_regions
 
 EXCLUDE_FILES = {"SBC037"}
 
-# Found by this test, not by this session's own steps: 4 raw .trn lines
-# (SBC027:94, SBC055 and SBC059:1710, SBC060:43) have TWO tabs
-# immediately after the timestamps with nothing between them (an empty
-# speaker field followed immediately by the real text's own leading tab).
-# sbcsae_reader._HEAD_RE's `rest` group is captured after a greedy `\s*`,
-# which swallows BOTH tabs at once -- collapsing "empty speaker, then a
-# tab, then real text" into a single gap, so split_line_fields' "content
-# before the first remaining tab is the speaker" rule (needed for real
-# colon-less codes like "MONTOYA") wrongly takes the actual TEXT as the
-# speaker and leaves text empty. That corrupts the IU's speaker (and,
-# since an empty-string speaker_field does NOT update current_speaker,
-# every following same-run IU keeps inheriting this garbled value until
-# the next well-formed speaker field). This is a real reader defect --
-# CLAUDE.md's "Reading the corpus" section calls the reader settled, but
-# also says not without new evidence, and this is exactly that: a
-# concrete, reproduced counter-example. Fixing sbcsae_reader.py itself is
-# out of scope for this session (not one of the 4 steps asked for, and it
-# would touch every downstream "settled" figure that depends on speaker
-# assignment) -- flagged to the user instead of silently patched. Only 4
-# of 59 files are affected, and the pilot (step 4) uses only SBC039,
-# which is not one of them, so this does not block today's task. Two
-# OTHER superficially similar cases, SBC052's "~Janine" and SBC056's
-# "@@@2]", are NOT this bug -- both are pre-existing, already-documented
-# real speaker-field content (split_line_fields' own docstring lists
-# "@@@2]" by name) and are left in scope.
-KNOWN_READER_BUG_FILES = {"SBC027", "SBC055", "SBC059", "SBC060"}
-
 # A "bare" word piece, after removing the three marks that can be fused
 # into it (=, %, !, per sbcsae_tokenizer.py's _sandwiched mechanism --
 # see reports/phase2_word_internal_marks.csv), must still look like a
@@ -93,7 +66,7 @@ def _unglossed_pieces_in_line(line: str) -> list[str]:
 def test_every_b_symbol_in_every_window_of_every_file_is_glossed():
     offenders = []
     for doc_id, units, *_ in iter_trn_documents():
-        if doc_id in EXCLUDE_FILES or doc_id in KNOWN_READER_BUG_FILES:
+        if doc_id in EXCLUDE_FILES:
             continue
         doc = build_document_structure(doc_id, units)
         if doc.n_tokens == 0:

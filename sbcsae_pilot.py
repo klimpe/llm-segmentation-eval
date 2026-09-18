@@ -37,8 +37,9 @@ position without needing the whole sample to be complete).
 """
 from __future__ import annotations
 
+import bisect
 import json
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from statistics import mean
@@ -117,6 +118,39 @@ def _core_only(indices: list[int], region: ScoreRegion) -> list[int]:
     return [i for i in indices if region.score_start <= i <= region.score_end]
 
 
+def _nearest_signed_offset(p: int, sorted_ref: list[int]) -> int | None:
+    """Signed distance from hypothesis boundary p to the nearest reference
+    boundary in sorted_ref (both in "after token p" space): positive means
+    p sits after the nearest reference boundary, negative means before.
+    None if sorted_ref is empty (no reference boundary to measure against
+    -- cannot happen for a real window with any within-turn reference
+    boundaries, but a degenerate/tiny synthetic case could hit it).
+    """
+    if not sorted_ref:
+        return None
+    idx = bisect.bisect_left(sorted_ref, p)
+    candidates = []
+    if idx < len(sorted_ref):
+        candidates.append(sorted_ref[idx])
+    if idx > 0:
+        candidates.append(sorted_ref[idx - 1])
+    nearest = min(candidates, key=lambda r: abs(p - r))
+    return p - nearest
+
+
+POSITION_BUCKET_SIZE = 200
+
+
+def _position_bucket(local_p: int) -> int:
+    """Which third of the window core local_p (a local, 1-indexed word
+    position) falls in, in fixed 200-word chunks (0: 1-200, 1: 201-400,
+    2: 401-600) -- literal word-count chunks, not window_size/3, so a
+    shorter final window's words all land in bucket 0 rather than being
+    rescaled.
+    """
+    return (local_p - 1) // POSITION_BUCKET_SIZE
+
+
 def _local_region_inputs(doc, region: ScoreRegion):
     """Reindex the reference (masses + turn boundaries) to the window's
     own local position space [1, local_n], local_n = the core's own word
@@ -165,7 +199,70 @@ def run_pilot(doc_id: str = DOC_ID, n_samples: int = N_SAMPLES) -> dict:
                     doc_id, condition, window_idx, sample_idx, prompt, region, doc.turn_boundaries
                 )
 
-    return {"doc": doc, "regions": regions, "draws": draws, "n_samples": n_samples}
+    return {"doc": doc, "regions": regions, "draws": draws, "n_samples": n_samples, "units": units}
+
+
+def _reference_segments_with_raw(units) -> list[tuple[int, int, str, str]]:
+    """Parallel to sbcsae_llm.build_document_structure's zero-word-drop
+    loop, but also keeps each kept segment's raw (pre-tokenisation) IU
+    text and global word-start position -- needed for a covariate
+    (overlap-bracket density) that only exists in text the tokeniser has
+    already stripped by the time DocumentStructure is built. Returns
+    (word_start, n_words, speaker, raw_text) per non-zero-word IU, in the
+    same order/positions build_document_structure would assign.
+    """
+    from sbcsae_tokenizer import tokenize, words_only
+
+    segments = []
+    running_index = 0
+    for u in units:
+        words = words_only(tokenize(u.text))
+        if not words:
+            continue
+        segments.append((running_index + 1, len(words), u.speaker, u.text))
+        running_index += len(words)
+    return segments
+
+
+def compute_window_reference_stats(doc, units, regions: list[ScoreRegion]) -> list[dict]:
+    """Per-window (score-core) reference covariates, condition-independent
+    (computed once from the reference alone, not from any draw): the
+    within-turn mean segment length (segments merged across a turn
+    boundary, i.e. the same "effective segment length" the within_turn
+    scoring mode itself operates over -- see sbcsae_scoring's
+    NON_COMPARABILITY_NOTE), the number of speaker changes, and the
+    overlap-bracket density per 100 words (raw '[' count, same convention
+    as sbcsae_per_file_stats.py, attributed to whichever window a segment
+    STARTS in).
+    """
+    segments = _reference_segments_with_raw(units)
+    stats = []
+    for region in regions:
+        local_ref_masses, local_turn_boundaries, lo = _local_region_inputs(doc, region)
+        local_n = sum(local_ref_masses)
+        local_ref_boundaries = masses_to_boundaries(local_ref_masses)
+        within_turn_boundaries_local = local_ref_boundaries - local_turn_boundaries
+        merged_masses = boundaries_to_masses(within_turn_boundaries_local, local_n) if local_n else []
+        mean_len = mean(merged_masses) if merged_masses else float("nan")
+
+        in_region = [
+            (start, n_words, raw)
+            for start, n_words, speaker, raw in segments
+            if region.score_start <= start <= region.score_end
+        ]
+        n_brackets = sum(raw.count("[") for _, _, raw in in_region)
+        n_words_in_region = region.score_end - region.score_start + 1
+
+        stats.append(
+            {
+                "mean_within_turn_segment_length": mean_len,
+                "n_speaker_changes": len(local_turn_boundaries),
+                "overlap_bracket_density_per_100_words": (
+                    n_brackets / n_words_in_region * 100 if n_words_in_region else 0.0
+                ),
+            }
+        )
+    return stats
 
 
 def analyse(pilot: dict) -> dict:
@@ -181,6 +278,8 @@ def analyse(pilot: dict) -> dict:
         "n_samples": n_samples,
         "regions": [(r.score_start, r.score_end) for r in regions],
     }
+    if "units" in pilot:
+        result["window_reference_stats"] = compute_window_reference_stats(doc, pilot["units"], regions)
 
     for condition in (Condition.A, Condition.B):
         cond_key = condition.value
@@ -217,8 +316,21 @@ def analyse(pilot: dict) -> dict:
                             {"sample": s, "window": w, "run_length": run, **policy}
                         )
 
+        # Auto-flagged (run > DEGENERATE_FLAG_THRESHOLD) draws are pulled
+        # out of every aggregate below and reported in their own row
+        # instead (CLAUDE.md, "Degenerate output": "Flag it automatically.
+        # Report affected draws separately rather than folding them into
+        # the aggregate."). needs_manual_review-only draws (11 < run <=
+        # 22) stay in the aggregate -- that threshold exists to prompt a
+        # human reading, not to change what gets averaged.
+        auto_flagged_samples = sorted({f["sample"] for f in degenerate_flags if f["flagged_degenerate"]})
+        auto_flagged_window_pairs = {
+            (f["sample"], f["window"]) for f in degenerate_flags if f["flagged_degenerate"]
+        }
+
         # -- whole-file hypothesis + score, per sample (only if every window in that sample parsed) --
-        whole_file_scores = []  # list of score_document results
+        whole_file_scores = []  # list of score_document results, tagged with "sample"
+        flagged_whole_file_scores = []  # same, for auto-flagged samples -- excluded from the above
         incomplete_samples = []
         for s in range(n_samples):
             if any(cdraws[s][w].status != "ok" for w in range(len(regions))):
@@ -232,10 +344,18 @@ def analyse(pilot: dict) -> dict:
                 doc.turn_boundaries | {i - 1 for i in hyp_indices}, doc.n_tokens
             )
             assert sum(hyp_masses) == sum(doc.ref_masses)
-            whole_file_scores.append(scores)
+            scores["sample"] = s
+            (flagged_whole_file_scores if s in auto_flagged_samples else whole_file_scores).append(scores)
 
         # -- per-window score, per sample (window-local scope; independent of other windows) --
-        per_window_scores = defaultdict(list)  # window_idx -> list of score_document results
+        per_window_scores = defaultdict(list)  # window_idx -> list of score_document results, tagged with "sample"
+        flagged_per_window_scores = defaultdict(list)  # same, for auto-flagged (sample, window) pairs
+        # -- offset distribution, pooled across all non-flagged, successful draws --
+        ref_within_sorted = sorted(masses_to_boundaries(doc.ref_masses) - doc.turn_boundaries)
+        offset_counts = Counter()
+        n_offset_boundaries = 0
+        # -- within-turn F1 by position inside the window core, pooled (micro-averaged) --
+        position_bucket_counts = defaultdict(lambda: {"tp": 0, "fp": 0, "fn": 0})
         for s in range(n_samples):
             for w, region in enumerate(regions):
                 d = cdraws[s][w]
@@ -251,7 +371,61 @@ def analyse(pilot: dict) -> dict:
                 # not an error: this is a scope limitation of window-local
                 # scoring, not a bad prediction.
                 local_hyp = [i - (lo - 1) for i in _core_only(d.kept, region) if i > lo]
-                per_window_scores[w].append(score_document(local_ref_masses, local_turn_boundaries, local_hyp))
+                scores = score_document(local_ref_masses, local_turn_boundaries, local_hyp)
+                scores["sample"] = s
+                flagged = (s, w) in auto_flagged_window_pairs
+                (flagged_per_window_scores if flagged else per_window_scores)[w].append(scores)
+                if flagged:
+                    continue
+
+                for i in _core_only(d.kept, region):
+                    p = i - 1
+                    offset = _nearest_signed_offset(p, ref_within_sorted)
+                    if offset is not None:
+                        offset_counts[offset] += 1
+                        n_offset_boundaries += 1
+
+                # local_hyp holds local 1-indexed START positions (i), like
+                # score_document's own hyp_within_turn_start_indices param
+                # -- convert to boundary ("after token p") space with i-1,
+                # the same conversion score_document does internally,
+                # before comparing against local_ref_within/local_turn_
+                # boundaries (both already in p-space).
+                local_ref_within = masses_to_boundaries(local_ref_masses) - local_turn_boundaries
+                local_hyp_within = {i - 1 for i in local_hyp}
+                local_n = sum(local_ref_masses)
+                buckets_present = {_position_bucket(p) for p in range(1, local_n + 1)}
+                for b in buckets_present:
+                    lo_b, hi_b = b * POSITION_BUCKET_SIZE + 1, min((b + 1) * POSITION_BUCKET_SIZE, local_n)
+                    ref_b = {p for p in local_ref_within if lo_b <= p <= hi_b}
+                    hyp_b = {p for p in local_hyp_within if lo_b <= p <= hi_b}
+                    counts = position_bucket_counts[b]
+                    counts["tp"] += len(ref_b & hyp_b)
+                    counts["fp"] += len(hyp_b - ref_b)
+                    counts["fn"] += len(ref_b - hyp_b)
+
+        offset_distribution = {
+            "counts": {k: offset_counts.get(k, 0) for k in range(-3, 4)},
+            "n_beyond_range": sum(v for k, v in offset_counts.items() if abs(k) > 3),
+            "n_total": n_offset_boundaries,
+        }
+
+        position_f1 = {}
+        for b in sorted(position_bucket_counts):
+            counts = position_bucket_counts[b]
+            tp, fp, fn = counts["tp"], counts["fp"], counts["fn"]
+            precision = tp / (tp + fp) if (tp + fp) else (1.0 if not fn else 0.0)
+            recall = tp / (tp + fn) if (tp + fn) else (1.0 if not fp else 0.0)
+            f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
+            position_f1[b] = {
+                "word_range": f"{b * POSITION_BUCKET_SIZE + 1}-{(b + 1) * POSITION_BUCKET_SIZE}",
+                "precision": precision,
+                "recall": recall,
+                "f1": f1,
+                "tp": tp,
+                "fp": fp,
+                "fn": fn,
+            }
 
         result[cond_key] = {
             "total_window_draws": total_window_draws,
@@ -259,9 +433,15 @@ def analyse(pilot: dict) -> dict:
             "failed": failed,
             "dropped_turn_initial_per_sample": dropped_per_sample,
             "degenerate_flags": degenerate_flags,
+            "auto_flagged_samples": auto_flagged_samples,
+            "auto_flagged_window_pairs": sorted(auto_flagged_window_pairs),
             "whole_file_scores": whole_file_scores,
+            "flagged_whole_file_scores": flagged_whole_file_scores,
             "incomplete_samples": incomplete_samples,
             "per_window_scores": dict(per_window_scores),
+            "flagged_per_window_scores": dict(flagged_per_window_scores),
+            "offset_distribution": offset_distribution,
+            "position_f1": position_f1,
         }
 
     return result
@@ -339,25 +519,31 @@ def write_report(result: dict, path: Path = Path("reports/phase2_pilot.md")) -> 
 
         lines.append(
             "### Whole-file scores per sample (intonation units, not discourse units; "
-            "within-turn is the headline)"
+            "within-turn is the headline; precision/recall/boundary-count ratio/Boundary "
+            "Similarity from the same unchanged metrics.py functions score_document "
+            "already called)"
         )
         lines.append("")
         if c["whole_file_scores"]:
-            lines.append("| sample | all_boundaries F1 | all_boundaries WD | within_turn F1 (headline) | within_turn WD |")
-            lines.append("|---|---|---|---|---|")
-            for i, sc in enumerate(c["whole_file_scores"]):
-                ab, wt = sc["all_boundaries"], sc["within_turn"]
-                lines.append(
-                    f"| {i} | {ab['f1']:.4f} | {ab['window_diff']:.4f} | "
-                    f"**{wt['f1']:.4f}** | {wt['window_diff']:.4f} |"
-                )
-            ab_f1s = [sc["all_boundaries"]["f1"] for sc in c["whole_file_scores"]]
-            wt_f1s = [sc["within_turn"]["f1"] for sc in c["whole_file_scores"]]
-            ab_m, ab_lo, ab_hi = _mean_range(ab_f1s)
-            wt_m, wt_lo, wt_hi = _mean_range(wt_f1s)
+            lines.append(
+                "| sample | scope | precision | recall | F1 | hyp/ref boundary ratio | "
+                "Boundary Similarity | WindowDiff |"
+            )
+            lines.append("|---|---|---|---|---|---|---|---|")
+            for sc in c["whole_file_scores"]:
+                for scope, label in (("all_boundaries", "all_boundaries"), ("within_turn", "**within_turn**")):
+                    m = sc[scope]
+                    lines.append(
+                        f"| {sc['sample']} | {label} | {m['precision']:.4f} | {m['recall']:.4f} | "
+                        f"{m['f1']:.4f} | {m['boundary_count_ratio']:.4f} | "
+                        f"{m['boundary_similarity']:.4f} | {m['window_diff']:.4f} |"
+                    )
             lines.append("")
-            lines.append(f"- all_boundaries F1: mean {ab_m:.4f}, range [{ab_lo:.4f}, {ab_hi:.4f}] (n={len(ab_f1s)})")
-            lines.append(f"- within_turn F1 (headline): mean {wt_m:.4f}, range [{wt_lo:.4f}, {wt_hi:.4f}] (n={len(wt_f1s)})")
+            for scope, label in (("all_boundaries", "all_boundaries"), ("within_turn", "within_turn (headline)")):
+                for metric in ("precision", "recall", "f1", "boundary_count_ratio", "boundary_similarity"):
+                    vals = [sc[scope][metric] for sc in c["whole_file_scores"]]
+                    m_, lo_, hi_ = _mean_range(vals)
+                    lines.append(f"- {label} {metric}: mean {m_:.4f}, range [{lo_:.4f}, {hi_:.4f}] (n={len(vals)})")
             lines.append(
                 "- all_boundaries and within_turn are not comparable to each other "
                 "(different effective segment lengths -- sbcsae_scoring.NON_COMPARABILITY_NOTE)."
@@ -367,29 +553,93 @@ def write_report(result: dict, path: Path = Path("reports/phase2_pilot.md")) -> 
         lines.append("")
 
         lines.append(
-            "### Per-window within_turn F1 and all_boundaries F1, by window position "
-            "(intonation units, not discourse units; mean over samples where that "
-            "window's own draw succeeded -- window scope only, independent of whether "
-            "other windows in the same sample failed)"
+            "### Auto-flagged draws (run > 22): excluded from every aggregate above, "
+            "reported on their own (CLAUDE.md, \"Degenerate output\": report affected "
+            "draws separately rather than folding them into the aggregate)"
+        )
+        lines.append("")
+        if c["flagged_whole_file_scores"]:
+            lines.append("| sample | scope | precision | recall | F1 | hyp/ref boundary ratio | Boundary Similarity |")
+            lines.append("|---|---|---|---|---|---|---|")
+            for sc in c["flagged_whole_file_scores"]:
+                for scope, label in (("all_boundaries", "all_boundaries"), ("within_turn", "**within_turn**")):
+                    m = sc[scope]
+                    lines.append(
+                        f"| {sc['sample']} | {label} | {m['precision']:.4f} | {m['recall']:.4f} | "
+                        f"{m['f1']:.4f} | {m['boundary_count_ratio']:.4f} | {m['boundary_similarity']:.4f} |"
+                    )
+        else:
+            lines.append("No sample had an auto-flagged (run > 22) window this condition.")
+        lines.append("")
+
+        lines.append(
+            "### Offset distribution, within-turn boundaries (signed distance from each "
+            "hypothesis boundary to the nearest reference boundary; pooled over all "
+            "non-flagged, successful window draws; 0 = exact match)"
+        )
+        lines.append("")
+        od = c["offset_distribution"]
+        lines.append("| offset | -3 | -2 | -1 | 0 | +1 | +2 | +3 | beyond +-3 | total |")
+        lines.append("|---|---|---|---|---|---|---|---|---|---|")
+        counts = od["counts"]
+        lines.append(
+            "| n | " + " | ".join(str(counts[k]) for k in range(-3, 4))
+            + f" | {od['n_beyond_range']} | {od['n_total']} |"
+        )
+        lines.append("")
+
+        lines.append(
+            "### Per-window scores by window position (intonation units, not discourse "
+            "units; mean over samples where that window's own draw succeeded and was not "
+            "auto-flagged -- window scope only, independent of whether other windows in "
+            "the same sample failed). Reference covariates (mean within-turn segment "
+            "length, speaker changes, overlap-bracket density) are condition-independent "
+            "properties of this window's own reference, shown alongside the scores they "
+            "plausibly explain -- not a claim that score changes by window position are a "
+            "drift or trend over the document, since windows are scored independently and "
+            "differ in reference difficulty, not in position per se."
         )
         lines.append("")
         lines.append(
-            "| window | score range (words) | n samples | within_turn F1 mean [range] | "
+            "| window | score range (words) | ref mean seg length | speaker changes | "
+            "overlap-bracket density /100w | n samples | within_turn F1 mean [range] | "
             "all_boundaries F1 mean [range] |"
         )
-        lines.append("|---|---|---|---|---|")
+        lines.append("|---|---|---|---|---|---|---|---|")
         for w, (score_start, score_end) in enumerate(result["regions"]):
+            ref_stats = result["window_reference_stats"][w]
             window_scores = c["per_window_scores"].get(w, [])
+            ref_cols = (
+                f"{ref_stats['mean_within_turn_segment_length']:.2f} | "
+                f"{ref_stats['n_speaker_changes']} | "
+                f"{ref_stats['overlap_bracket_density_per_100_words']:.2f}"
+            )
             if not window_scores:
-                lines.append(f"| {w} | {score_start}-{score_end} | 0 | n/a | n/a |")
+                lines.append(f"| {w} | {score_start}-{score_end} | {ref_cols} | 0 | n/a | n/a |")
                 continue
             wt_f1s = [sc["within_turn"]["f1"] for sc in window_scores]
             ab_f1s = [sc["all_boundaries"]["f1"] for sc in window_scores]
             wt_m, wt_lo, wt_hi = _mean_range(wt_f1s)
             ab_m, ab_lo, ab_hi = _mean_range(ab_f1s)
             lines.append(
-                f"| {w} | {score_start}-{score_end} | {len(window_scores)} | "
+                f"| {w} | {score_start}-{score_end} | {ref_cols} | {len(window_scores)} | "
                 f"{wt_m:.4f} [{wt_lo:.4f}, {wt_hi:.4f}] | {ab_m:.4f} [{ab_lo:.4f}, {ab_hi:.4f}] |"
+            )
+        lines.append("")
+
+        lines.append(
+            "### Within-turn F1 by position inside the window core (pooled/micro-averaged "
+            "tp/fp/fn over all non-flagged, successful window draws and all samples -- not "
+            "a mean of per-window F1s)"
+        )
+        lines.append("")
+        lines.append("| word range in core | precision | recall | F1 | tp | fp | fn |")
+        lines.append("|---|---|---|---|---|---|---|")
+        for b in sorted(c["position_f1"]):
+            pf = c["position_f1"][b]
+            lines.append(
+                f"| {pf['word_range']} | {pf['precision']:.4f} | {pf['recall']:.4f} | "
+                f"{pf['f1']:.4f} | {pf['tp']} | {pf['fp']} | {pf['fn']} |"
             )
         lines.append("")
 
