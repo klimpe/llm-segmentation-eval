@@ -1,12 +1,16 @@
 __pycache__/
 *.pyc
 .pytest_cache/
-corpora/
-llm_output/
-llm_output_fewshot/
-llm_output_temp_resample/
-llm_output_fewshot_temp_resample/
-llm_output_sbcsae/
-llm_output_sbcsae_rerun_b/
+# no trailing slash: some worktrees symlink these in from the main
+# checkout, and a trailing-slash pattern does not match a symlink
+corpora
+llm_output
+llm_output_fewshot
+llm_output_temp_resample
+llm_output_fewshot_temp_resample
+llm_output_sbcsae
+llm_output_sbcsae_rerun_b
+llm_output_sbcsae_batch1
+llm_output_sbcsae_sbc053_400w
 .env
 reports/private/

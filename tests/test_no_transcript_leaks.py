@@ -33,6 +33,21 @@ ALLOWED_COLUMNS = {
         "random_within_turn_f1_mean", "random_within_turn_f1_lo", "random_within_turn_f1_hi",
         "random_all_boundaries_f1_mean", "random_all_boundaries_f1_lo", "random_all_boundaries_f1_hi",
     },
+    "reports/phase2_batch1_scores.csv": {
+        "doc_id", "condition", "sample", "scope", "precision", "recall", "f1", "window_diff",
+        "boundary_similarity", "hyp_ref_ratio", "n_ref_boundaries", "n_hyp_boundaries", "flagged",
+        "collapse_rate", "share_words_in_runs",
+    },
+    "reports/phase2_batch1_offsets.csv": {
+        "doc_id", "condition", "sample", "offset", "count", "cue_after_named_word_count",
+    },
+    "reports/phase2_batch1_degenerate.csv": {
+        "doc_id", "condition", "sample", "window", "run_length", "ref_boundaries_in_span",
+        "file_max_legitimate_run", "old_auto_flagged", "new_degenerate",
+    },
+    "reports/phase2_batch1_baselines.csv": {
+        "doc_id", "scope", "baseline", "precision", "recall", "f1", "window_diff", "boundary_similarity",
+    },
     "reports/phase2_capitalization.csv": {"category", "label", "n_words", "n_capitalised", "share_capitalised"},
     "reports/phase2_capitalization_by_file.csv": {
         "file",
