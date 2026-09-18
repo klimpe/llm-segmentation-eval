@@ -139,27 +139,32 @@ and reported on its own, in the "Auto-flagged draws" table below.
 #### The -1 offset asymmetry (1,112 at -1 vs 699 at +1; condition A is nearly symmetric): does it sit next to cues?
 
 `sbcsae_cue_adjacency.py`, reading only these cached draws (no model
-calls), checked cue adjacency two ways for the same population as the
-table above, split by offset bucket: (a) is the hypothesis boundary's
-OWN position immediately followed/preceded by a cue in the rendered
-text, and (b) is the TRUE reference boundary it is nearest to itself
-cue-marked (i.e. would the cue rule, below, have predicted it). (a) is
-unremarkable at -1 (7.6% followed, 16.1% preceded -- lower than most
-other buckets); (b) is not:
+calls), asks the direct, hypothesis-side question for condition B only
+(dropped for A: it renders no cues at all, so the answer there is 0% by
+construction, not a comparison worth a column): for the actual word the
+model NAMED as a new unit's start, is a cue rendered immediately AFTER
+that named word? If the model systematically names the word before a
+cue instead of the word after it, the named word itself should be
+followed by a cue far more often than the document's own background
+rate -- the share of ALL within-turn-eligible word positions (every word
+except each turn's own first word) with a cue immediately after them:
+12.7% (493/3,886) on this file.
 
 | offset | -3 | -2 | -1 | 0 | +1 | +2 | +3 | beyond |
 |---|---|---|---|---|---|---|---|---|
-| true boundary cue-marked | 42.8% | 47.0% | **75.4%** | 63.8% | 50.6% | 46.5% | 54.4% | 46.4% |
+| share, named word followed by a cue | 25.8% | 14.8% | **75.4%** | 20.7% | 18.6% | 19.8% | 31.0% | 19.0% |
+| vs. base rate (12.7%) | 2.03x | 1.16x | **5.95x** | 1.63x | 1.47x | 1.56x | 2.44x | 1.50x |
 
-**Yes, the -1 mass sits next to cues** -- 75.4% of offset -1 errors are
-nearest a true boundary that is itself cue-marked, higher than any other
-bucket including exact matches (63.8%). Condition A shows 0% throughout
-by construction (it renders no cues at all -- see
-reports/phase2_llm_design.md S11). This reads as an indexing ambiguity,
-not a segmentation failure: at a cue-marked boundary, the model may be
-naming the last word before the interruption rather than the first word
-after it. Addressed in the prompt (reports/phase2_llm_design.md S11) and
-tested by rerunning this file (below).
+**Yes, offset -1 sits next to cues, far above the background rate**:
+75.4% of offset -1 hypotheses name a word immediately followed by a
+cue -- 5.95x the base rate, well clear of every other bucket (next
+highest 2.44x, at +3). This is the correlation the "the model names the
+word before a cue instead of the word after it" theory predicts, and it
+is stronger under this direct, hypothesis-side check than the earlier,
+indirect reference-side version of this analysis. **But a strong
+correlation is not the same as a confirmed mechanism** -- see the rerun
+below, which tested the fix this correlation motivated and did not
+confirm it.
 
 ### Per-window scores by window position (intonation units, not discourse units; mean over samples where that window's own draw succeeded and was not auto-flagged -- window scope only, independent of whether other windows in the same sample failed). Reference covariates (mean within-turn segment length, speaker changes, overlap-bracket density) are condition-independent properties of this window's own reference, shown alongside the scores they plausibly explain -- not a claim that score changes by window position are a drift or trend over the document, since windows are scored independently and differ in reference difficulty, not in position per se.
 
@@ -223,21 +228,53 @@ comparison below just as much as to the original run.
 | offset +1, share | 699/5784 = 12.1% | 516/5177 = 10.0% |
 | -1 : +1 ratio | 1.59 | 2.00 |
 
-**Mixed, and not a clean confirmation.** No draw in the rerun crossed the
-degenerate-run threshold (0 of 5 samples, vs. 2 of 5 originally) and
-within-turn F1 and the exact-match share both moved up slightly -- but
-these are single small-sample comparisons (n=4 vs n=5, plus the
-original's own [0.4886, 0.5422] F1 range already brackets the rerun's
-0.5278 mean) and could easily be resampling noise, not a causal effect
-of the prompt change (CLAUDE.md: "Phase 1 produced several
-document-level findings that did not survive resampling"). **The -1
-asymmetry itself did not shrink -- proportionally it grew slightly**
-(-1:+1 ratio 1.59 -> 2.00). The clarified wording did not visibly fix
-the specific imbalance it was written to address, on this one file at
-this sample size. This does not overturn S11's cue-adjacency finding
-(that finding is about where the -1 errors sit, not about whether one
-rewording should have closed the gap) but it means the indexing-clarity
-hypothesis is not yet confirmed as sufficient, only motivated. Scaling
-to more files, not more rewording of one prompt sentence on one file,
-is the right next step for resolving it.
+**The indexing-ambiguity hypothesis is tested and rejected.** The
+clarified wording did not reduce the -1 asymmetry it was written to
+fix -- if anything, the -1:+1 ratio grew (1.59 -> 2.00), the wrong
+direction for the theory. The within-turn F1 and exact-match-share
+upticks are within sample noise, not evidence the fix worked: the
+original run's own [0.4886, 0.5422] F1 range already brackets the
+rerun's 0.5278 mean, the aggregate sample count changed too (n=4 -> n=5,
+since no rerun draw crossed the degenerate-run threshold this time), and
+CLAUDE.md already documents this exact failure mode from phase 1
+("several document-level findings that did not survive resampling"). A
+single 5-sample rerun on one file cannot distinguish "the fix helped a
+little" from ordinary run-to-run variance, and the one number that
+*would* have been unambiguous evidence for the theory -- the asymmetry
+itself shrinking -- moved the wrong way.
+
+This does not retract the correlation above (offset -1 genuinely sits
+5.95x the base rate for a cue following the named word -- that finding
+stands on its own, from cached draws, independent of this rerun). What
+it rejects is the SPECIFIC causal story built on that correlation: that
+the model already picks the right cue-marked boundary and merely reports
+the wrong side of it, and that telling it which side to report would
+fix the -1 mass. It does not. **The clarified wording is kept anyway**
+-- it is unambiguous, costs nothing, and removes a real gap in the
+prompt regardless of whether it explains this particular asymmetry --
+but the asymmetry itself needs a different explanation. See below.
+
+## Remaining explanation
+
+A labeling ambiguity was rejected, not the correlation that motivated
+it. What remains consistent with both the strong offset -1/cue
+correlation and the failed causal test: **in condition B the model may
+be placing its actual, intended boundary systematically one word earlier
+than the reference specifically near cues** -- not misreporting which
+side of a correctly-identified boundary to name, but genuinely deciding
+the unit ends a word sooner than the transcriber did, converging on the
+neighbourhood of the same cue-marked position from an earlier point in
+the sequence. This differs from the rejected theory in a way that
+predicts a different fix: a labeling confusion is fixed by clarifying
+which word to report (tried, did not work); an early-decision tendency
+is not, since the "wrong" word is genuinely the one the model decided
+to mark, not a correct decision reported off-by-one. This would be
+tested by a task variant where a labeling ambiguity is structurally
+impossible -- e.g. asking the model to report each unit as a (start,
+end) word-index pair rather than a single start position -- and checking
+whether the reported END of the unit immediately before a cue-marked
+boundary still lands one word early at a rate above baseline. If it
+does, the boundary decision itself, not its reporting, is early; if the
+asymmetry disappears under that representation, the current single-
+position format is somehow reintroducing it some other way.
 

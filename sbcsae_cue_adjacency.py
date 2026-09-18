@@ -3,32 +3,39 @@
 table; condition A is nearly symmetric) coincide with prosodic cues in
 the rendered text?
 
-For every within-turn hypothesis boundary in the cached SBC039 pilot
-draws -- the SAME population as sbcsae_pilot.analyse's
-offset_distribution (non-flagged, successful window draws' core-kept
-indices only) -- this reports, split by signed offset bucket (-3..+3,
-plus 0 and beyond) and by condition, the share immediately FOLLOWED by a
-cue in the rendered text (a cue sits between the boundary and the
-reported start word, i.e. the cue leads into the new unit) and the share
-immediately PRECEDED by one (a cue sits between the boundary and the
-word that closes the previous unit).
+Hypothesis-side check (not reference-side -- an earlier version of this
+script asked whether the TRUE reference boundary nearest a hypothesis
+was itself cue-marked; that is a different, more indirect question and
+is no longer computed here). The direct question, matching the failure
+mode under test ("the model names the word before a cue instead of the
+word after it"): for the actual word the model named as a new unit's
+start, is a cue rendered immediately AFTER that named word? If the model
+systematically names the word before a cue instead of the word after it,
+the named word itself should be immediately followed by a cue far more
+often than baseline -- and specifically so at offset -1, where the named
+word is exactly the word that would be the cue-preceding word under that
+error theory.
+
+Reported against a base rate: the share of ALL within-turn-eligible word
+positions in the document (every word except each turn's own first word
+-- the same restriction the model is asked to obey) that have a cue
+immediately after them. Offset -1 is only evidence for the "names the
+word before the cue" theory if its share sits FAR above this base rate,
+not merely above zero.
+
+Condition A is not reported here: it renders no cues at all
+(sbcsae_llm.render_turn_line drops every Cue item unless condition is
+B), so "is a cue rendered after the named word" is 0% for every offset
+bucket in A by construction -- a structural fact, not a comparison worth
+a column.
 
 Reads only the cached raw model output already on disk under
 llm_output_sbcsae/ (written by sbcsae_pilot.run_pilot) -- makes NO model
 calls, ever. Raises if an expected cache file is missing rather than
 falling back to a fresh call.
-
-Condition A renders no cues at all (sbcsae_llm.render_turn_line drops
-every Cue item unless condition is B) -- so "in the rendered text", both
-shares are 0.0 for every offset bucket in A, by construction. This is
-reported as the structural control it is, not a finding: the adjacency
-channel this script measures only exists for the model to see in B in
-the first place, which is exactly why any offset-bucket skew relative to
-cue position can only be a B phenomenon.
 """
 from __future__ import annotations
 
-import bisect
 from collections import defaultdict
 
 from masses import masses_to_boundaries
@@ -40,23 +47,6 @@ from sbcsae_tokenizer import Condition, Cue, Word
 from sbcsae_windows import assert_boundaries_each_in_one_region, assert_regions_tile, build_score_regions
 
 BUCKET_KEYS = [-3, -2, -1, 0, 1, 2, 3, "beyond"]
-
-
-def _nearest_ref(p: int, sorted_ref: list[int]) -> int:
-    """The reference boundary _nearest_signed_offset(p, sorted_ref) measured
-    against -- recomputed here (not returned by that function) so this
-    module can also ask "was THAT reference boundary itself cue-marked",
-    a question about the true position an erring hypothesis was closest
-    to, distinct from cue-adjacency at the hypothesis's OWN (possibly
-    wrong) position.
-    """
-    idx = bisect.bisect_left(sorted_ref, p)
-    candidates = []
-    if idx < len(sorted_ref):
-        candidates.append(sorted_ref[idx])
-    if idx > 0:
-        candidates.append(sorted_ref[idx - 1])
-    return min(candidates, key=lambda r: abs(p - r))
 
 
 def _read_cached_window(doc_id, condition, window_idx, sample_idx, region, turn_boundaries):
@@ -79,27 +69,46 @@ def _read_cached_window(doc_id, condition, window_idx, sample_idx, region, turn_
         return "fail", str(e)
 
 
-def _gap_cue_flags(doc) -> dict[int, bool]:
-    """gap[p] = True iff a Cue item (any kind, in doc.turns' own item order
-    -- condition-independent: every Cue rendered inline in condition B,
-    none of them dropped there) appears strictly between global word p and
-    global word p+1 (p=0: before the document's very first word). Boundary
+def _cue_after_word_flags(doc) -> dict[int, bool]:
+    """after[w] = True iff a Cue item (any kind, in doc.turns' own item
+    order -- condition B renders every one of them inline, none dropped)
+    appears strictly between global word w and global word w+1. Boundary
     items (never rendered in either condition) are transparent: they
-    neither set nor clear the pending-cue flag.
+    neither set nor clear the pending-cue flag. Keyed by WORD index (not
+    boundary/gap index), since the question here is about a named word,
+    not a boundary position. A trailing cue after a turn's own last word
+    is not recorded: no word follows it in that turn, so it cannot be
+    "immediately after" a nameable word in the next position.
     """
-    gap: dict[int, bool] = {}
+    after: dict[int, bool] = {}
     for turn in doc.turns:
-        pos = turn.start_index - 1
+        idx = turn.start_index
+        prev_word_idx = None
         pending = False
         for item in turn.items:
             if isinstance(item, Cue):
                 pending = True
             elif isinstance(item, Word):
-                gap[pos] = pending
+                if prev_word_idx is not None:
+                    after[prev_word_idx] = pending
                 pending = False
-                pos += 1
-        gap[pos] = pending  # trailing cue(s) after the turn's last word
-    return gap
+                prev_word_idx = idx
+                idx += 1
+    return after
+
+
+def _within_turn_candidate_words(doc) -> list[int]:
+    """Every word position a model answer could legitimately name: every
+    word in the document except each turn's own first word (turn-initial
+    positions are never a valid answer -- sbcsae_llm._IU_DEFINITION,
+    sbcsae_scoring.score_document's ValueError for one anyway). This is
+    the population the base rate is computed over.
+    """
+    candidates = []
+    for turn in doc.turns:
+        for offset in range(1, turn.n_words):  # skip offset 0: the turn's own first word
+            candidates.append(turn.start_index + offset)
+    return candidates
 
 
 def analyse_cue_adjacency(doc_id: str = DOC_ID, n_samples: int = N_SAMPLES) -> dict:
@@ -111,90 +120,86 @@ def analyse_cue_adjacency(doc_id: str = DOC_ID, n_samples: int = N_SAMPLES) -> d
     assert_regions_tile(regions, doc.n_tokens)
     assert_boundaries_each_in_one_region(regions, masses_to_boundaries(doc.ref_masses), doc.n_tokens)
 
-    gap_flags = _gap_cue_flags(doc)
+    cue_after = _cue_after_word_flags(doc)
     ref_within_sorted = sorted(masses_to_boundaries(doc.ref_masses) - doc.turn_boundaries)
 
-    result = {}
-    for condition in (Condition.A, Condition.B):
-        draws = {}
-        for s in range(n_samples):
-            for w, region in enumerate(regions):
-                draws[(s, w)] = _read_cached_window(doc_id, condition, w, s, region, doc.turn_boundaries)
+    # -- base rate: share of ALL within-turn-eligible word positions in
+    # the document with a cue immediately after them -- condition- and
+    # draw-independent, computed once over the whole document, not just
+    # the positions any particular draw happened to name. --
+    candidates = _within_turn_candidate_words(doc)
+    base_rate_n = len(candidates)
+    base_rate_hits = sum(1 for w in candidates if cue_after.get(w, False))
+    base_rate = base_rate_hits / base_rate_n if base_rate_n else float("nan")
 
-        # Reproduce sbcsae_pilot.analyse's auto-flagged (run > 22) exclusion
-        # exactly, so this population matches the published offset table.
-        auto_flagged_window_pairs = set()
-        for (s, w), (status, kept) in draws.items():
-            if status != "ok":
+    condition = Condition.B  # condition A renders no cues at all -- see module docstring
+    draws = {}
+    for s in range(n_samples):
+        for w, region in enumerate(regions):
+            draws[(s, w)] = _read_cached_window(doc_id, condition, w, s, region, doc.turn_boundaries)
+
+    # Reproduce sbcsae_pilot.analyse's auto-flagged (run > 22) exclusion
+    # exactly, so this population matches the published offset table.
+    auto_flagged_window_pairs = set()
+    for (s, w), (status, kept) in draws.items():
+        if status != "ok":
+            continue
+        region = regions[w]
+        core = sorted(i - 1 for i in _core_only(kept, region))
+        run = max_consecutive_run(core)
+        if run > 0 and review_policy(run)["flagged_degenerate"]:
+            auto_flagged_window_pairs.add((s, w))
+
+    buckets = defaultdict(lambda: {"total": 0, "cue_after_named_word": 0})
+
+    for (s, w), (status, kept) in draws.items():
+        if status != "ok" or (s, w) in auto_flagged_window_pairs:
+            continue
+        region = regions[w]
+        for i in _core_only(kept, region):  # i = the named word, 1-indexed global position
+            p = i - 1  # boundary position, for offset bucketing only
+            offset = _nearest_signed_offset(p, ref_within_sorted)
+            if offset is None:
                 continue
-            region = regions[w]
-            core = sorted(i - 1 for i in _core_only(kept, region))
-            run = max_consecutive_run(core)
-            if run > 0 and review_policy(run)["flagged_degenerate"]:
-                auto_flagged_window_pairs.add((s, w))
+            bucket = offset if -3 <= offset <= 3 else "beyond"
+            b = buckets[bucket]
+            b["total"] += 1
+            b["cue_after_named_word"] += int(cue_after.get(i, False))
 
-        buckets = defaultdict(lambda: {"total": 0, "followed": 0, "preceded": 0, "true_boundary_cue_marked": 0})
+    per_bucket = {k: dict(buckets[k]) for k in BUCKET_KEYS if k in buckets}
+    for k in BUCKET_KEYS:
+        per_bucket.setdefault(k, {"total": 0, "cue_after_named_word": 0})
 
-        for (s, w), (status, kept) in draws.items():
-            if status != "ok" or (s, w) in auto_flagged_window_pairs:
-                continue
-            region = regions[w]
-            for i in _core_only(kept, region):
-                p = i - 1
-                offset = _nearest_signed_offset(p, ref_within_sorted)
-                if offset is None:
-                    continue
-                bucket = offset if -3 <= offset <= 3 else "beyond"
-                b = buckets[bucket]
-                b["total"] += 1
-                if condition is Condition.B:
-                    # Only B ever renders a cue -- see module docstring.
-                    b["followed"] += int(gap_flags.get(p, False))
-                    b["preceded"] += int(gap_flags.get(p - 1, False))
-                    # A THIRD, offset-symmetric question, distinct from the
-                    # two above: was the TRUE (nearest) reference boundary
-                    # this hypothesis is being scored against itself
-                    # cue-marked (i.e. would the cue rule have predicted
-                    # it)? "followed"/"preceded" above are local to the
-                    # hypothesis's own (possibly wrong, for offset != 0)
-                    # position; for offset -1 or +1 that is a DIFFERENT gap
-                    # from the true boundary's own leading gap, so this is
-                    # needed to directly answer "does the true position an
-                    # off-by-one error is closest to sit next to a cue".
-                    p_ref = _nearest_ref(p, ref_within_sorted)
-                    b["true_boundary_cue_marked"] += int(gap_flags.get(p_ref, False))
-                # Condition A: all three stay 0 -- its rendered text never
-                # contains a cue symbol, by construction.
-
-        result[condition.value] = {k: dict(buckets[k]) for k in BUCKET_KEYS if k in buckets}
-        for k in BUCKET_KEYS:
-            result[condition.value].setdefault(
-                k, {"total": 0, "followed": 0, "preceded": 0, "true_boundary_cue_marked": 0}
-            )
-
-    return result
+    return {
+        "base_rate": base_rate,
+        "base_rate_n": base_rate_n,
+        "base_rate_hits": base_rate_hits,
+        "buckets": per_bucket,
+    }
 
 
 def format_report(result: dict) -> str:
     lines = []
     lines.append(
-        "Cue adjacency of within-turn hypothesis boundaries, by signed offset "
-        "from the nearest reference boundary (same population as the pilot's "
-        "offset-distribution table; shares in parentheses)."
+        "Condition B: share of within-turn hypothesis boundaries whose NAMED "
+        "word is immediately followed by a cue, by signed offset from the "
+        "nearest reference boundary (same population as the pilot's "
+        "offset-distribution table)."
     )
-    for cond_key in ("A", "B"):
-        lines.append(f"\nCondition {cond_key}:")
-        lines.append(f"{'offset':>8} {'total':>7} {'followed':>16} {'preceded':>16} {'true_bnd_cued':>16}")
-        for k in BUCKET_KEYS:
-            b = result[cond_key][k]
-            total = b["total"]
-            f_share = b["followed"] / total if total else float("nan")
-            p_share = b["preceded"] / total if total else float("nan")
-            t_share = b["true_boundary_cue_marked"] / total if total else float("nan")
-            lines.append(
-                f"{str(k):>8} {total:>7} {b['followed']:>7} ({f_share:6.1%}) {b['preceded']:>7} ({p_share:6.1%}) "
-                f"{b['true_boundary_cue_marked']:>7} ({t_share:6.1%})"
-            )
+    lines.append(
+        f"\nBase rate (all within-turn-eligible word positions in the document "
+        f"with a cue immediately after them): {result['base_rate_hits']}/{result['base_rate_n']} "
+        f"= {result['base_rate']:.1%}"
+    )
+    lines.append(f"\n{'offset':>8} {'total':>7} {'cue after named word':>22} {'share':>8} {'vs base rate':>14}")
+    for k in BUCKET_KEYS:
+        b = result["buckets"][k]
+        total = b["total"]
+        share = b["cue_after_named_word"] / total if total else float("nan")
+        ratio = share / result["base_rate"] if total and result["base_rate"] else float("nan")
+        lines.append(
+            f"{str(k):>8} {total:>7} {b['cue_after_named_word']:>22} {share:>7.1%} {ratio:>13.2f}x"
+        )
     return "\n".join(lines)
 
 

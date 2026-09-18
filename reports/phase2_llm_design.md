@@ -360,37 +360,34 @@ corpus-wide baseline run now completes in well under a minute total, not
 per file — without changing the metric's published definition, only the
 implementation.
 
-## 11. Prompt indexing convention: first word of the new unit, never the last of the old one
+## 11. Prompt indexing convention: first word of the new unit, never the last of the old one -- tested and rejected as the explanation for the -1 asymmetry
 
 **Finding.** The pilot's offset-distribution table (reports/
 phase2_pilot.md) shows condition B's within-turn errors skewed toward
 offset -1 (1,112 boundaries) far more than +1 (699) -- condition A is
 nearly symmetric. `sbcsae_cue_adjacency.py`, reading only the cached
-pilot draws (no model calls), checked whether this skew coincides with
-prosodic cues: for each hypothesis boundary, whether the TRUE reference
-boundary it is nearest to is itself cue-marked (i.e. would the cue rule,
-§10, have predicted it), broken down by offset bucket. Result (condition
-B; condition A renders no cues at all, so this question is 0% there by
-construction):
+pilot draws (no model calls), asks the direct, hypothesis-side question
+for condition B (dropped for A: it renders no cues at all, so the answer
+is 0% there by construction): for the word the model actually NAMED as a
+new unit's start, is a cue rendered immediately after it? Reported
+against the document's own background rate for this (12.7%, all
+within-turn-eligible word positions with a cue immediately after them),
+by offset bucket:
 
 | offset | -3 | -2 | -1 | 0 | +1 | +2 | +3 | beyond |
 |---|---|---|---|---|---|---|---|---|
-| true boundary cue-marked | 42.8% | 47.0% | **75.4%** | 63.8% | 50.6% | 46.5% | 54.4% | 46.4% |
+| share, named word followed by a cue | 25.8% | 14.8% | **75.4%** | 20.7% | 18.6% | 19.8% | 31.0% | 19.0% |
+| vs. base rate (12.7%) | 2.03x | 1.16x | **5.95x** | 1.63x | 1.47x | 1.56x | 2.44x | 1.50x |
 
-The -1 bucket's own local cue-adjacency (a cue immediately next to the
-*hypothesis's own* position) is unremarkable -- 7.6% immediately followed
-by a cue, 16.1% immediately preceded, both lower than most other
-buckets. But 75.4% of offset -1 errors are nearest a reference boundary
-that IS cue-marked -- higher than any other bucket, including exact
-matches (63.8%). The -1 mass concentrates specifically at true,
-cue-marked boundaries, with the model's answer landing one word short of
-them.
+Offset -1 sits at 5.95x the base rate, far clear of every other bucket
+(next highest 2.44x) -- a strong, direct correlation between the -1 mass
+and cue-following positions.
 
-**Decision.** This pattern is consistent with an indexing ambiguity, not
-a segmentation-ability gap: at a cue-marked boundary, "where do you
-report the position" has two plausible readings -- the last word before
-the interruption, or the first word after it -- and the prompt did not
-say which. Added to `sbcsae_llm._IU_DEFINITION`: "A reported position is
+**Decision (tried).** This pattern read as an indexing ambiguity, not a
+segmentation-ability gap: at a cue-marked boundary, "where do you report
+the position" has two plausible readings -- the last word before the
+interruption, or the first word after it -- and the prompt did not say
+which. Added to `sbcsae_llm._IU_DEFINITION`: "A reported position is
 always the first word of the new intonation unit -- never the last word
 of the one before it," with a short invented example (not drawn from the
 corpus). Nothing was added about how cues relate to boundaries -- that
@@ -398,6 +395,24 @@ relationship is exactly what condition B's cue-visibility manipulation
 exists to let the model discover or fail to discover on its own (§9's
 "purely denotational, never relational" principle for the cue glossary
 applies here too).
+
+**Outcome: tested and rejected.** Rerunning SBC039 condition B
+(n_samples=5, clarified prompt, reports/phase2_pilot.md's rerun section)
+did not reduce the -1 asymmetry -- the -1:+1 ratio grew, 1.59 -> 2.00,
+the wrong direction for the theory. The small F1/exact-match upticks in
+that rerun sit within the original run's own sample range and are
+attributed to resampling noise, not to the fix (CLAUDE.md already
+documents this exact failure mode from phase 1). **The correlation above
+is real and unretracted; the specific causal story built on it -- that
+the model already finds the right cue-marked boundary and merely reports
+the wrong side of it -- is not.** The clarified wording is kept anyway
+(unambiguous, free, a genuine prompt-quality improvement regardless of
+this asymmetry), but it is not the explanation for the -1 mass. See
+reports/phase2_pilot.md's "Remaining explanation" section: the model may
+be deciding the boundary itself one word early near cues, not
+misreporting a correctly-decided one -- a claim a (start, end)-pair
+answer format could test directly, since it removes the labeling
+ambiguity structurally rather than by instruction.
 
 ## 12. `window_diff` speed: implementation optimised, definition unchanged
 
