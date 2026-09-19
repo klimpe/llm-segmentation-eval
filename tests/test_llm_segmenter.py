@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from llm_segmenter import (
@@ -16,9 +18,24 @@ class _TextBlock:
         self.text = text
 
 
+class _Usage:
+    """Stands in for anthropic.types.Usage: enough of the real pydantic
+    model's interface (model_dump) for call_model's usage-sidecar logging
+    to exercise against, with fixed token counts (not asserted on by any
+    test here -- only that a sidecar gets written at all)."""
+
+    def __init__(self):
+        self.input_tokens = 100
+        self.output_tokens = 20
+
+    def model_dump(self, mode="python"):
+        return {"input_tokens": self.input_tokens, "output_tokens": self.output_tokens}
+
+
 class _Response:
     def __init__(self, text):
         self.content = [_TextBlock(text)]
+        self.usage = _Usage()
 
 
 class StubClient:
@@ -178,6 +195,36 @@ def test_segment_document_uses_cache_on_second_call(tmp_path):
     segment_document(tokens, ref_masses, "doc1", tmp_path, client=client)
 
     assert client.call_count == 1  # second call reused the cached file
+
+
+def test_segment_document_writes_usage_sidecar_on_fresh_call(tmp_path):
+    tokens = ["a"] * 10
+    ref_masses = [3, 4, 3]
+    client = StubClient("[1, 4, 8]")
+
+    segment_document(tokens, ref_masses, "doc1", tmp_path, client=client)
+
+    usage = json.loads((tmp_path / "doc1.usage.json").read_text())
+    assert usage == {"input_tokens": 100, "output_tokens": 20}
+
+
+def test_segment_document_does_not_rewrite_usage_sidecar_on_cache_hit(tmp_path):
+    # A cache hit never calls the model, so it has no new response.usage
+    # to log -- an old sidecar (or none at all, for cache files written
+    # before usage logging existed) is left exactly as it is.
+    tokens = ["a"] * 10
+    ref_masses = [3, 4, 3]
+    client = StubClient("[1, 4, 8]")
+
+    segment_document(tokens, ref_masses, "doc1", tmp_path, client=client)
+    sidecar_path = tmp_path / "doc1.usage.json"
+    original_usage_text = sidecar_path.read_text()
+
+    client.reply_text = "[1, 5, 8]"  # would prove a fresh call happened, if one did
+    segment_document(tokens, ref_masses, "doc1", tmp_path, client=client)
+
+    assert client.call_count == 1
+    assert sidecar_path.read_text() == original_usage_text
 
 
 def test_segment_document_retries_on_empty_cached_file(tmp_path):

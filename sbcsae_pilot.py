@@ -12,7 +12,12 @@ never asked for -- see sbcsae_scoring.py). Response handling:
 
   - Raw output persisted to disk before parsing, one file per (condition,
     window, sample) -- llm_output_sbcsae/ (gitignored: real transcript-
-    derived content, per the licence's no-corpus-data-in-git rule).
+    derived content, per the licence's no-corpus-data-in-git rule). A
+    fresh call also writes a <same-name>.usage.json sidecar next to it
+    (llm_segmenter.usage_sidecar_path) with response.usage's token
+    counts, so cost is recoverable from the cache directory alone --
+    cache files from before this existed simply have no sidecar, and are
+    never backfilled by re-querying an already-cached sample.
   - Cached and reused; a cached response that fails to parse/validate is
     retried once with a fresh call (same policy as llm_segmenter.py).
   - A turn-initial index in the response is dropped, not treated as an
@@ -44,7 +49,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from statistics import mean
 
-from llm_segmenter import call_model, parse_boundary_indices
+from llm_segmenter import call_model, parse_boundary_indices, usage_sidecar_path
 from masses import boundaries_to_masses, masses_to_boundaries
 from sbcsae_degenerate_threshold import max_consecutive_run_with_span, review_policy
 from sbcsae_llm import build_document_structure, build_prompt, render_window
@@ -127,10 +132,11 @@ def _draw_one_window(
     # response.
     reason = ""
     for _ in range(MAX_FRESH_ATTEMPTS):
-        raw = call_model(prompt, model=MODEL)
-        path.write_text(raw, encoding="utf-8")
+        response = call_model(prompt, model=MODEL)
+        path.write_text(response.text, encoding="utf-8")
+        usage_sidecar_path(path).write_text(json.dumps(response.usage), encoding="utf-8")
         try:
-            kept, dropped = _parse_window_response(raw, region, turn_boundaries)
+            kept, dropped = _parse_window_response(response.text, region, turn_boundaries)
             return WindowDraw(status="ok", kept=kept, dropped_turn_initial=dropped)
         except ValueError as e:
             reason = str(e)

@@ -51,6 +51,7 @@ ALLOWED_COLUMNS = {
     "reports/phase2_batch1_a_vs_b.csv": {
         "doc_id",
         "a_precision", "b_precision", "a_recall", "b_recall", "a_f1", "b_f1",
+        "a_f1_min", "a_f1_max", "b_f1_min", "b_f1_max", "b_min_above_a_max",
         "a_window_diff", "b_window_diff", "a_boundary_similarity", "b_boundary_similarity",
         "a_hyp_ref_ratio", "b_hyp_ref_ratio", "a_collapse_rate", "b_collapse_rate",
     },

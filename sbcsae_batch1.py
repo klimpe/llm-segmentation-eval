@@ -579,7 +579,11 @@ def write_report(batch: list[dict], path: Path = Path("reports/phase2_batch1.md"
         "pooled score, or significance claim is made on 10 files -- CLAUDE.md's own "
         "standing caution applies. 'B beats A' on collapse_rate means B's rate is the "
         "LOWER of the two (fewer degenerate draws), the opposite direction from the "
-        "other metrics where higher is better."
+        "other metrics where higher is better. F1 additionally carries each condition's "
+        "own min/max over its non-flagged samples, next to the means: a difference of "
+        "means with overlapping ranges is not a per-file result on its own, so the table "
+        "also marks the files where B's F1 range clears A's entirely (B's minimum sample "
+        "above A's maximum sample)."
     )
     lines.append("")
 
@@ -587,14 +591,45 @@ def write_report(batch: list[dict], path: Path = Path("reports/phase2_batch1.md"
         vals = [float(r[metric]) for r in _scores_for(doc_id, cond_key, "within_turn") if r[metric] != ""]
         return mean(vals) if vals else float("nan")
 
+    def _within_turn_min_max(doc_id, cond_key, metric):
+        vals = [float(r[metric]) for r in _scores_for(doc_id, cond_key, "within_turn") if r[metric] != ""]
+        return (min(vals), max(vals)) if vals else (float("nan"), float("nan"))
+
     def _collapse_rate_for(doc_id, cond_key):
         any_rows = [r for r in scores if r["doc_id"] == doc_id and r["condition"] == cond_key]
         return float(any_rows[0]["collapse_rate"]) if any_rows else float("nan")
+
+    def _baseline_metric(doc_id, baseline_name, metric):
+        rows = [r for r in baselines if r["doc_id"] == doc_id and r["scope"] == "within_turn" and r["baseline"] == baseline_name]
+        return float(rows[0][metric]) if rows else float("nan")
+
+    def _cell(v):
+        return "nan" if v != v else f"{v:.4f}"
+
+    # A file+condition with 0 non-flagged samples is a result in its own
+    # right (total collapse, not a partial or noisy one), not a missing
+    # table cell -- reported here as its own line, before the table where
+    # it would otherwise show up only as "nan".
+    zero_valid_pairs = [
+        (d, c) for d in batch_doc_ids for c in ("A", "B") if _within_turn_mean(d, c, "f1") != _within_turn_mean(d, c, "f1")
+    ]
+    for doc_id, cond_key in zero_valid_pairs:
+        cr = _collapse_rate_for(doc_id, cond_key)
+        lines.append(
+            f"**Result: {doc_id} condition {cond_key} has no valid within-turn score at all.** "
+            f"All {N_SAMPLES} samples were auto-flagged degenerate (old whole-corpus rule) and "
+            f"the new per-file rule's own collapse_rate for this file+condition is {cr:.1%} -- "
+            f"this is total collapse under this condition for this file, not a partial or noisy "
+            f"result, and not a missing data point."
+        )
+        lines.append("")
 
     comparison_metrics = ["precision", "recall", "f1", "window_diff", "boundary_similarity", "hyp_ref_ratio"]
     header_cells = ["doc_id"]
     for m in comparison_metrics:
         header_cells += [f"A {m}", f"B {m}"]
+        if m == "f1":
+            header_cells += ["A f1 min", "A f1 max", "B f1 min", "B f1 max", "B min > A max"]
     header_cells += ["A collapse_rate", "B collapse_rate"]
     lines.append("| " + " | ".join(header_cells) + " |")
     lines.append("|" + "---|" * len(header_cells))
@@ -603,6 +638,7 @@ def write_report(batch: list[dict], path: Path = Path("reports/phase2_batch1.md"
     f1_b_wins = 0
     f1_comparable = 0
     f1_nan_files = []
+    f1_non_overlap_files = []
     collapse_diffs = []
     collapse_b_wins = 0
     for doc_id in batch_doc_ids:
@@ -613,6 +649,13 @@ def write_report(batch: list[dict], path: Path = Path("reports/phase2_batch1.md"
             b_v = _within_turn_mean(doc_id, "B", m)
             per_metric_vals[m] = (a_v, b_v)
             row_cells += [f"{a_v:.4f}", f"{b_v:.4f}"]
+            if m == "f1":
+                a_min, a_max = _within_turn_min_max(doc_id, "A", "f1")
+                b_min, b_max = _within_turn_min_max(doc_id, "B", "f1")
+                non_overlap = b_min > a_max  # nan comparisons are False -- SBC044 correctly excluded
+                row_cells += [_cell(a_min), _cell(a_max), _cell(b_min), _cell(b_max), "yes" if non_overlap else "no"]
+                if non_overlap:
+                    f1_non_overlap_files.append(doc_id)
         a_cr = _collapse_rate_for(doc_id, "A")
         b_cr = _collapse_rate_for(doc_id, "B")
         row_cells += [f"{a_cr:.4f}", f"{b_cr:.4f}"]
@@ -633,8 +676,9 @@ def write_report(batch: list[dict], path: Path = Path("reports/phase2_batch1.md"
             collapse_b_wins += 1
     lines.append("")
     lines.append(
-        f"B beats A on within_turn F1 on {f1_b_wins} of {f1_comparable} files with a valid A "
-        f"score ({', '.join(d for d, diff in f1_diffs if diff > 0) or 'none'})."
+        f"B's F1 mean is higher than A's on {f1_b_wins} of {f1_comparable} files with a valid A "
+        f"score ({', '.join(d for d, diff in f1_diffs if diff > 0) or 'none'}) -- a difference of "
+        f"means, which can still have overlapping per-sample ranges."
         + (
             f" {', '.join(f1_nan_files)} excluded: condition A had 0 non-flagged samples there "
             f"(all auto-flagged degenerate -- see its own section above), so no A score exists "
@@ -644,12 +688,76 @@ def write_report(batch: list[dict], path: Path = Path("reports/phase2_batch1.md"
         )
     )
     lines.append(
+        f"**B's F1 minimum is above A's F1 maximum (non-overlapping ranges, the stronger, "
+        f"actual per-file result) on {len(f1_non_overlap_files)} of {f1_comparable} files: "
+        f"{', '.join(f1_non_overlap_files) or 'none'}.**"
+    )
+    lines.append(
         f"B beats A on collapse_rate (lower = fewer degenerate draws) on {collapse_b_wins} of "
         f"{len(batch_doc_ids)} files ({', '.join(d for d, diff in collapse_diffs if diff < 0) or 'none'})."
     )
     lines.append(
         "These are per-file counts, not a significance test or a pooled claim -- 10 files "
         "do not support one."
+    )
+    lines.append("")
+
+    lines.append("### Mechanism: over-segmentation in both conditions, not better localization")
+    lines.append("")
+    a_hrr = [v for v in (_within_turn_mean(d, "A", "hyp_ref_ratio") for d in batch_doc_ids) if v == v]
+    b_hrr = [v for v in (_within_turn_mean(d, "B", "hyp_ref_ratio") for d in batch_doc_ids) if v == v]
+    a_prec_vals = [v for v in (_within_turn_mean(d, "A", "precision") for d in batch_doc_ids) if v == v]
+    b_prec_vals = [v for v in (_within_turn_mean(d, "B", "precision") for d in batch_doc_ids) if v == v]
+    a_rec_vals = [v for v in (_within_turn_mean(d, "A", "recall") for d in batch_doc_ids) if v == v]
+    b_rec_vals = [v for v in (_within_turn_mean(d, "B", "recall") for d in batch_doc_ids) if v == v]
+
+    precision_improves = 0
+    precision_comparable = 0
+    recall_drops_files = []
+    for d in batch_doc_ids:
+        a_p = _within_turn_mean(d, "A", "precision")
+        b_p = _within_turn_mean(d, "B", "precision")
+        a_r = _within_turn_mean(d, "A", "recall")
+        b_r = _within_turn_mean(d, "B", "recall")
+        if a_p != a_p:
+            continue
+        precision_comparable += 1
+        if b_p > a_p:
+            precision_improves += 1
+        if b_r < a_r:
+            recall_drops_files.append(d)
+
+    cue_prec_vals = [_baseline_metric(d, "cue_rule", "precision") for d in batch_doc_ids]
+    model_prec_all = a_prec_vals + b_prec_vals
+
+    lines.append(
+        f"Both conditions over-segment relative to the reference: within-turn hyp_ref_ratio "
+        f"(per-file mean) ranges {min(a_hrr):.4f}-{max(a_hrr):.4f} in condition A and "
+        f"{min(b_hrr):.4f}-{max(b_hrr):.4f} in condition B -- entirely above 1 (more predicted "
+        f"boundaries than reference boundaries) on every one of these 10 files, in both "
+        f"conditions. This is the same fact as precision being low and recall high throughout: "
+        f"precision means range {min(a_prec_vals):.4f}-{max(a_prec_vals):.4f} (A) / "
+        f"{min(b_prec_vals):.4f}-{max(b_prec_vals):.4f} (B), against recall means of "
+        f"{min(a_rec_vals):.4f}-{max(a_rec_vals):.4f} (A) / {min(b_rec_vals):.4f}-{max(b_rec_vals):.4f} (B)."
+    )
+    lines.append("")
+    lines.append(
+        f"B's advantage over A comes mainly from producing fewer spurious boundaries, not from "
+        f"locating them better: precision improves from A to B on {precision_improves} of "
+        f"{precision_comparable} comparable files, while recall does not move consistently in "
+        f"the same direction -- it drops on {len(recall_drops_files)} of {precision_comparable} "
+        f"({', '.join(recall_drops_files) or 'none'}). A change that mainly relocated boundaries "
+        f"more accurately would be expected to raise both; here it is precision that moves "
+        f"reliably and recall that does not."
+    )
+    lines.append("")
+    lines.append(
+        f"The cue rule is precision-dominant where the model is not: its own within-turn "
+        f"precision ranges {min(cue_prec_vals):.4f}-{max(cue_prec_vals):.4f} across these 10 "
+        f"files, against the model's own precision range of {min(model_prec_all):.4f}-"
+        f"{max(model_prec_all):.4f} (both conditions pooled, {len(model_prec_all)} file-condition "
+        f"means) -- the cue rule places far fewer, better-targeted boundaries; the model, in "
+        f"either condition, does not."
     )
     lines.append("")
 
@@ -663,10 +771,6 @@ def write_report(batch: list[dict], path: Path = Path("reports/phase2_batch1.md"
         "per-sample model draws, so there is no collapse_rate column here."
     )
     lines.append("")
-
-    def _baseline_metric(doc_id, baseline_name, metric):
-        rows = [r for r in baselines if r["doc_id"] == doc_id and r["scope"] == "within_turn" and r["baseline"] == baseline_name]
-        return float(rows[0][metric]) if rows else float("nan")
 
     baseline_metrics = ["precision", "recall", "f1", "window_diff", "boundary_similarity"]
     bl_header = ["doc_id"]
@@ -774,6 +878,10 @@ def write_comparison_csvs(batch: list[dict]) -> None:
         rows = [r for r in baselines if r["doc_id"] == doc_id and r["scope"] == "within_turn" and r["baseline"] == baseline_name]
         return float(rows[0][metric]) if rows else float("nan")
 
+    def _within_turn_min_max(doc_id, cond_key, metric):
+        vals = [float(r[metric]) for r in _scores_for(doc_id, cond_key, "within_turn") if r[metric] != ""]
+        return (min(vals), max(vals)) if vals else (float("nan"), float("nan"))
+
     def _fmt(v):
         return "" if v != v else f"{v:.4f}"  # v != v is the nan check
 
@@ -786,12 +894,18 @@ def write_comparison_csvs(batch: list[dict]) -> None:
         header = ["doc_id"]
         for m in comparison_metrics:
             header += [f"a_{m}", f"b_{m}"]
+            if m == "f1":
+                header += ["a_f1_min", "a_f1_max", "b_f1_min", "b_f1_max", "b_min_above_a_max"]
         header += ["a_collapse_rate", "b_collapse_rate"]
         w.writerow(header)
         for doc_id in batch_doc_ids:
             row = [doc_id]
             for m in comparison_metrics:
                 row += [_fmt(_within_turn_mean(doc_id, "A", m)), _fmt(_within_turn_mean(doc_id, "B", m))]
+                if m == "f1":
+                    a_min, a_max = _within_turn_min_max(doc_id, "A", "f1")
+                    b_min, b_max = _within_turn_min_max(doc_id, "B", "f1")
+                    row += [_fmt(a_min), _fmt(a_max), _fmt(b_min), _fmt(b_max), str(b_min > a_max)]
             row += [_fmt(_collapse_rate_for(doc_id, "A")), _fmt(_collapse_rate_for(doc_id, "B"))]
             w.writerow(row)
 

@@ -1055,24 +1055,35 @@ Base rate (cue immediately after a within-turn-eligible word): 493/3886 = 12.7%
 
 ## A vs. B: per-file comparison, within-turn scope (batch files only, not the pilot)
 
-Every metric below is a per-file mean over that file+condition's non-flagged samples (within-turn scope), plus collapse_rate under the new per-file rule (S14 above). This is a per-file table, not an aggregate: no cross-file mean, pooled score, or significance claim is made on 10 files -- CLAUDE.md's own standing caution applies. 'B beats A' on collapse_rate means B's rate is the LOWER of the two (fewer degenerate draws), the opposite direction from the other metrics where higher is better.
+Every metric below is a per-file mean over that file+condition's non-flagged samples (within-turn scope), plus collapse_rate under the new per-file rule (S14 above). This is a per-file table, not an aggregate: no cross-file mean, pooled score, or significance claim is made on 10 files -- CLAUDE.md's own standing caution applies. 'B beats A' on collapse_rate means B's rate is the LOWER of the two (fewer degenerate draws), the opposite direction from the other metrics where higher is better. F1 additionally carries each condition's own min/max over its non-flagged samples, next to the means: a difference of means with overlapping ranges is not a per-file result on its own, so the table also marks the files where B's F1 range clears A's entirely (B's minimum sample above A's maximum sample).
 
-| doc_id | A precision | B precision | A recall | B recall | A f1 | B f1 | A window_diff | B window_diff | A boundary_similarity | B boundary_similarity | A hyp_ref_ratio | B hyp_ref_ratio | A collapse_rate | B collapse_rate |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| SBC024 | 0.4253 | 0.5326 | 0.8517 | 0.7335 | 0.5668 | 0.6160 | 0.5458 | 0.3827 | 0.4288 | 0.5070 | 2.0103 | 1.3873 | 0.1600 | 0.0000 |
-| SBC005 | 0.3658 | 0.4591 | 0.7208 | 0.7434 | 0.4846 | 0.5675 | 0.5256 | 0.4250 | 0.3923 | 0.4504 | 1.9790 | 1.6193 | 0.0400 | 0.0000 |
-| SBC041 | 0.4251 | 0.4387 | 0.6953 | 0.7701 | 0.5273 | 0.5581 | 0.4291 | 0.4289 | 0.4285 | 0.4282 | 1.6373 | 1.7606 | 0.0667 | 0.1667 |
-| SBC053 | 0.3021 | 0.4291 | 0.7176 | 0.7592 | 0.4252 | 0.5480 | 0.6324 | 0.4493 | 0.3473 | 0.4194 | 2.3754 | 1.7730 | 0.3714 | 0.3143 |
-| SBC012 | 0.4440 | 0.5022 | 0.7784 | 0.8167 | 0.5647 | 0.6219 | 0.4226 | 0.3525 | 0.4598 | 0.5026 | 1.7624 | 1.6267 | 0.0286 | 0.1143 |
-| SBC045 | 0.3938 | 0.4316 | 0.8053 | 0.8163 | 0.5285 | 0.5645 | 0.5466 | 0.4992 | 0.4135 | 0.4369 | 2.0475 | 1.8932 | 0.2500 | 0.2000 |
-| SBC016 | 0.3005 | 0.3886 | 0.6473 | 0.7004 | 0.4097 | 0.4998 | 0.5591 | 0.4383 | 0.3070 | 0.3822 | 2.1652 | 1.8040 | 0.2750 | 0.2000 |
-| SBC014 | 0.3342 | 0.4147 | 0.6688 | 0.7810 | 0.4448 | 0.5413 | 0.5804 | 0.4959 | 0.3624 | 0.4149 | 2.0105 | 1.8851 | 0.1556 | 0.4222 |
-| SBC052 | 0.3633 | 0.4390 | 0.7616 | 0.6943 | 0.4917 | 0.5376 | 0.5566 | 0.4432 | 0.3837 | 0.4304 | 2.0970 | 1.5828 | 0.2600 | 0.1800 |
-| SBC044 | nan | 0.4140 | nan | 0.8181 | nan | 0.5497 | nan | 0.5101 | nan | 0.4220 | nan | 1.9768 | 0.4727 | 0.1273 |
+**Result: SBC044 condition A has no valid within-turn score at all.** All 5 samples were auto-flagged degenerate (old whole-corpus rule) and the new per-file rule's own collapse_rate for this file+condition is 47.3% -- this is total collapse under this condition for this file, not a partial or noisy result, and not a missing data point.
 
-B beats A on within_turn F1 on 9 of 9 files with a valid A score (SBC024, SBC005, SBC041, SBC053, SBC012, SBC045, SBC016, SBC014, SBC052). SBC044 excluded: condition A had 0 non-flagged samples there (all auto-flagged degenerate -- see its own section above), so no A score exists to compare.
+| doc_id | A precision | B precision | A recall | B recall | A f1 | B f1 | A f1 min | A f1 max | B f1 min | B f1 max | B min > A max | A window_diff | B window_diff | A boundary_similarity | B boundary_similarity | A hyp_ref_ratio | B hyp_ref_ratio | A collapse_rate | B collapse_rate |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| SBC024 | 0.4253 | 0.5326 | 0.8517 | 0.7335 | 0.5668 | 0.6160 | 0.5178 | 0.6031 | 0.5523 | 0.6422 | no | 0.5458 | 0.3827 | 0.4288 | 0.5070 | 2.0103 | 1.3873 | 0.1600 | 0.0000 |
+| SBC005 | 0.3658 | 0.4591 | 0.7208 | 0.7434 | 0.4846 | 0.5675 | 0.4629 | 0.5075 | 0.5551 | 0.5787 | yes | 0.5256 | 0.4250 | 0.3923 | 0.4504 | 1.9790 | 1.6193 | 0.0400 | 0.0000 |
+| SBC041 | 0.4251 | 0.4387 | 0.6953 | 0.7701 | 0.5273 | 0.5581 | 0.5059 | 0.5468 | 0.5463 | 0.5713 | no | 0.4291 | 0.4289 | 0.4285 | 0.4282 | 1.6373 | 1.7606 | 0.0667 | 0.1667 |
+| SBC053 | 0.3021 | 0.4291 | 0.7176 | 0.7592 | 0.4252 | 0.5480 | 0.4252 | 0.4252 | 0.5304 | 0.5682 | yes | 0.6324 | 0.4493 | 0.3473 | 0.4194 | 2.3754 | 1.7730 | 0.3714 | 0.3143 |
+| SBC012 | 0.4440 | 0.5022 | 0.7784 | 0.8167 | 0.5647 | 0.6219 | 0.5277 | 0.5940 | 0.6102 | 0.6306 | yes | 0.4226 | 0.3525 | 0.4598 | 0.5026 | 1.7624 | 1.6267 | 0.0286 | 0.1143 |
+| SBC045 | 0.3938 | 0.4316 | 0.8053 | 0.8163 | 0.5285 | 0.5645 | 0.5182 | 0.5420 | 0.5444 | 0.5756 | yes | 0.5466 | 0.4992 | 0.4135 | 0.4369 | 2.0475 | 1.8932 | 0.2500 | 0.2000 |
+| SBC016 | 0.3005 | 0.3886 | 0.6473 | 0.7004 | 0.4097 | 0.4998 | 0.3779 | 0.4386 | 0.4812 | 0.5298 | yes | 0.5591 | 0.4383 | 0.3070 | 0.3822 | 2.1652 | 1.8040 | 0.2750 | 0.2000 |
+| SBC014 | 0.3342 | 0.4147 | 0.6688 | 0.7810 | 0.4448 | 0.5413 | 0.4227 | 0.4650 | 0.5278 | 0.5531 | yes | 0.5804 | 0.4959 | 0.3624 | 0.4149 | 2.0105 | 1.8851 | 0.1556 | 0.4222 |
+| SBC052 | 0.3633 | 0.4390 | 0.7616 | 0.6943 | 0.4917 | 0.5376 | 0.4876 | 0.4958 | 0.5200 | 0.5547 | yes | 0.5566 | 0.4432 | 0.3837 | 0.4304 | 2.0970 | 1.5828 | 0.2600 | 0.1800 |
+| SBC044 | nan | 0.4140 | nan | 0.8181 | nan | 0.5497 | nan | nan | 0.5469 | 0.5510 | no | nan | 0.5101 | nan | 0.4220 | nan | 1.9768 | 0.4727 | 0.1273 |
+
+B's F1 mean is higher than A's on 9 of 9 files with a valid A score (SBC024, SBC005, SBC041, SBC053, SBC012, SBC045, SBC016, SBC014, SBC052) -- a difference of means, which can still have overlapping per-sample ranges. SBC044 excluded: condition A had 0 non-flagged samples there (all auto-flagged degenerate -- see its own section above), so no A score exists to compare.
+**B's F1 minimum is above A's F1 maximum (non-overlapping ranges, the stronger, actual per-file result) on 7 of 9 files: SBC005, SBC053, SBC012, SBC045, SBC016, SBC014, SBC052.**
 B beats A on collapse_rate (lower = fewer degenerate draws) on 7 of 10 files (SBC024, SBC005, SBC053, SBC045, SBC016, SBC052, SBC044).
 These are per-file counts, not a significance test or a pooled claim -- 10 files do not support one.
+
+### Mechanism: over-segmentation in both conditions, not better localization
+
+Both conditions over-segment relative to the reference: within-turn hyp_ref_ratio (per-file mean) ranges 1.6373-2.3754 in condition A and 1.3873-1.9768 in condition B -- entirely above 1 (more predicted boundaries than reference boundaries) on every one of these 10 files, in both conditions. This is the same fact as precision being low and recall high throughout: precision means range 0.3005-0.4440 (A) / 0.3886-0.5326 (B), against recall means of 0.6473-0.8517 (A) / 0.6943-0.8181 (B).
+
+B's advantage over A comes mainly from producing fewer spurious boundaries, not from locating them better: precision improves from A to B on 9 of 9 comparable files, while recall does not move consistently in the same direction -- it drops on 2 of 9 (SBC024, SBC052). A change that mainly relocated boundaries more accurately would be expected to raise both; here it is precision that moves reliably and recall that does not.
+
+The cue rule is precision-dominant where the model is not: its own within-turn precision ranges 0.7158-0.9224 across these 10 files, against the model's own precision range of 0.3005-0.5326 (both conditions pooled, 19 file-condition means) -- the cue rule places far fewer, better-targeted boundaries; the model, in either condition, does not.
 
 ## Baselines (cue rule and density-matched random), within-turn scope, same 10 batch files
 
