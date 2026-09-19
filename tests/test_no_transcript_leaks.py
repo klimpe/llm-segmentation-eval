@@ -33,6 +33,36 @@ ALLOWED_COLUMNS = {
         "random_within_turn_f1_mean", "random_within_turn_f1_lo", "random_within_turn_f1_hi",
         "random_all_boundaries_f1_mean", "random_all_boundaries_f1_lo", "random_all_boundaries_f1_hi",
     },
+    "reports/phase2_batch1_scores.csv": {
+        "doc_id", "condition", "sample", "scope", "precision", "recall", "f1", "window_diff",
+        "boundary_similarity", "hyp_ref_ratio", "n_ref_boundaries", "n_hyp_boundaries", "flagged",
+        "collapse_rate", "share_words_in_runs", "total_window_draws",
+    },
+    "reports/phase2_batch1_offsets.csv": {
+        "doc_id", "condition", "sample", "offset", "count", "cue_after_named_word_count",
+    },
+    "reports/phase2_batch1_degenerate.csv": {
+        "doc_id", "condition", "sample", "window", "run_length", "ref_boundaries_in_span",
+        "file_max_legitimate_run", "old_auto_flagged", "new_degenerate",
+    },
+    "reports/phase2_batch1_baselines.csv": {
+        "doc_id", "scope", "baseline", "precision", "recall", "f1", "window_diff", "boundary_similarity",
+    },
+    "reports/phase2_batch1_a_vs_b.csv": {
+        "doc_id",
+        "a_precision", "b_precision", "a_recall", "b_recall", "a_f1", "b_f1",
+        "a_window_diff", "b_window_diff", "a_boundary_similarity", "b_boundary_similarity",
+        "a_hyp_ref_ratio", "b_hyp_ref_ratio", "a_collapse_rate", "b_collapse_rate",
+    },
+    "reports/phase2_batch1_baselines_wide.csv": {
+        "doc_id",
+        "cue_rule_precision", "random_precision", "cue_rule_recall", "random_recall",
+        "cue_rule_f1", "random_f1", "cue_rule_window_diff", "random_window_diff",
+        "cue_rule_boundary_similarity", "random_boundary_similarity",
+    },
+    "reports/phase2_batch1_vs_cue_rule.csv": {
+        "doc_id", "cue_rule_f1", "a_f1", "a_vs_cue_rule", "a_diff", "b_f1", "b_vs_cue_rule", "b_diff",
+    },
     "reports/phase2_capitalization.csv": {"category", "label", "n_words", "n_capitalised", "share_capitalised"},
     "reports/phase2_capitalization_by_file.csv": {
         "file",

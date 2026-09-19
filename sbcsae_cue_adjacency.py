@@ -1,7 +1,6 @@
-"""Phase 2 follow-up: does the pilot's condition-B offset asymmetry
-(-1: 1112 vs +1: 699 -- reports/phase2_pilot.md's offset-distribution
-table; condition A is nearly symmetric) coincide with prosodic cues in
-the rendered text?
+"""Phase 2: does an offset -1 hypothesis boundary (the model's named word
+landing one word before the reference) coincide with a prosodic cue in
+the rendered text more than chance?
 
 Hypothesis-side check (not reference-side -- an earlier version of this
 script asked whether the TRUE reference boundary nearest a hypothesis
@@ -23,25 +22,34 @@ immediately after them. Offset -1 is only evidence for the "names the
 word before the cue" theory if its share sits FAR above this base rate,
 not merely above zero.
 
-Condition A is not reported here: it renders no cues at all
-(sbcsae_llm.render_turn_line drops every Cue item unless condition is
-B), so "is a cue rendered after the named word" is 0% for every offset
-bucket in A by construction -- a structural fact, not a comparison worth
-a column.
+Condition A renders no cues at all (sbcsae_llm.render_turn_line drops
+every Cue item unless condition is B) -- so for condition A, both the
+per-bucket share and the base rate are 0 BY CONSTRUCTION, not computed
+from the document's real (condition-independent) cue markup, to stay
+faithful to "in the rendered text" -- a structural fact, not a finding.
 
-Reads only the cached raw model output already on disk under
-llm_output_sbcsae/ (written by sbcsae_pilot.run_pilot) -- makes NO model
-calls, ever. Raises if an expected cache file is missing rather than
-falling back to a fresh call.
+Reads only the cached raw model output already on disk (written by
+sbcsae_pilot.run_pilot, in whatever output_dir it was given) -- makes NO
+model calls, ever. Raises if an expected cache file is missing rather
+than falling back to a fresh call.
 """
 from __future__ import annotations
 
 from collections import defaultdict
+from pathlib import Path
 
 from masses import masses_to_boundaries
 from sbcsae_degenerate_threshold import max_consecutive_run, review_policy
 from sbcsae_llm import build_document_structure
-from sbcsae_pilot import DOC_ID, N_SAMPLES, _cache_path, _core_only, _nearest_signed_offset, _parse_window_response
+from sbcsae_pilot import (
+    DOC_ID,
+    N_SAMPLES,
+    OUTPUT_DIR,
+    _cache_path,
+    _core_only,
+    _nearest_signed_offset,
+    _parse_window_response,
+)
 from sbcsae_reader import CORPUS_DIR, read_trn_document
 from sbcsae_tokenizer import Condition, Cue, Word
 from sbcsae_windows import assert_boundaries_each_in_one_region, assert_regions_tile, build_score_regions
@@ -49,13 +57,13 @@ from sbcsae_windows import assert_boundaries_each_in_one_region, assert_regions_
 BUCKET_KEYS = [-3, -2, -1, 0, 1, 2, 3, "beyond"]
 
 
-def _read_cached_window(doc_id, condition, window_idx, sample_idx, region, turn_boundaries):
+def _read_cached_window(doc_id, condition, window_idx, sample_idx, region, turn_boundaries, output_dir):
     """Parses a cache file that must already exist. Raises FileNotFoundError
     if it doesn't (this script must never call the model), or returns
     ("ok", kept) / ("fail", reason) exactly like sbcsae_pilot._draw_one_window
     would for that same cached content, without ever writing or calling.
     """
-    path = _cache_path(doc_id, condition, window_idx, sample_idx)
+    path = _cache_path(doc_id, condition, window_idx, sample_idx, output_dir)
     if not path.exists():
         raise FileNotFoundError(
             f"missing cached draw {path} -- this script must not call the model; "
@@ -111,7 +119,19 @@ def _within_turn_candidate_words(doc) -> list[int]:
     return candidates
 
 
-def analyse_cue_adjacency(doc_id: str = DOC_ID, n_samples: int = N_SAMPLES) -> dict:
+def per_sample_offset_rows(
+    doc_id: str,
+    condition: Condition,
+    n_samples: int = N_SAMPLES,
+    output_dir: Path = OUTPUT_DIR,
+) -> list[dict]:
+    """One row per (sample, offset bucket) with that sample's own count
+    and cue_after_named_word count -- the exact granularity
+    reports/phase2_batch1_offsets.csv needs, and what the pooled,
+    file-level report (analyse_cue_adjacency) is built from, so the two
+    can never diverge. Auto-flagged (run > 22) samples/windows are
+    excluded, matching sbcsae_pilot.analyse's own convention.
+    """
     path = CORPUS_DIR / f"{doc_id}.trn"
     real_doc_id, units, *_ = read_trn_document(path)
     doc = build_document_structure(real_doc_id, units)
@@ -120,26 +140,17 @@ def analyse_cue_adjacency(doc_id: str = DOC_ID, n_samples: int = N_SAMPLES) -> d
     assert_regions_tile(regions, doc.n_tokens)
     assert_boundaries_each_in_one_region(regions, masses_to_boundaries(doc.ref_masses), doc.n_tokens)
 
-    cue_after = _cue_after_word_flags(doc)
     ref_within_sorted = sorted(masses_to_boundaries(doc.ref_masses) - doc.turn_boundaries)
+    # Condition A renders no cues -- see module docstring: cue_after stays
+    # empty (every lookup below then defaults to False/0), not computed
+    # from the document's real, condition-independent cue markup.
+    cue_after = _cue_after_word_flags(doc) if condition is Condition.B else {}
 
-    # -- base rate: share of ALL within-turn-eligible word positions in
-    # the document with a cue immediately after them -- condition- and
-    # draw-independent, computed once over the whole document, not just
-    # the positions any particular draw happened to name. --
-    candidates = _within_turn_candidate_words(doc)
-    base_rate_n = len(candidates)
-    base_rate_hits = sum(1 for w in candidates if cue_after.get(w, False))
-    base_rate = base_rate_hits / base_rate_n if base_rate_n else float("nan")
-
-    condition = Condition.B  # condition A renders no cues at all -- see module docstring
     draws = {}
     for s in range(n_samples):
         for w, region in enumerate(regions):
-            draws[(s, w)] = _read_cached_window(doc_id, condition, w, s, region, doc.turn_boundaries)
+            draws[(s, w)] = _read_cached_window(doc_id, condition, w, s, region, doc.turn_boundaries, output_dir)
 
-    # Reproduce sbcsae_pilot.analyse's auto-flagged (run > 22) exclusion
-    # exactly, so this population matches the published offset table.
     auto_flagged_window_pairs = set()
     for (s, w), (status, kept) in draws.items():
         if status != "ok":
@@ -150,31 +161,76 @@ def analyse_cue_adjacency(doc_id: str = DOC_ID, n_samples: int = N_SAMPLES) -> d
         if run > 0 and review_policy(run)["flagged_degenerate"]:
             auto_flagged_window_pairs.add((s, w))
 
-    buckets = defaultdict(lambda: {"total": 0, "cue_after_named_word": 0})
-
+    per_sample_bucket = defaultdict(lambda: {"count": 0, "cue_after_named_word_count": 0})
     for (s, w), (status, kept) in draws.items():
         if status != "ok" or (s, w) in auto_flagged_window_pairs:
             continue
         region = regions[w]
         for i in _core_only(kept, region):  # i = the named word, 1-indexed global position
-            p = i - 1  # boundary position, for offset bucketing only
-            offset = _nearest_signed_offset(p, ref_within_sorted)
+            offset = _nearest_signed_offset(i - 1, ref_within_sorted)
             if offset is None:
                 continue
             bucket = offset if -3 <= offset <= 3 else "beyond"
-            b = buckets[bucket]
-            b["total"] += 1
-            b["cue_after_named_word"] += int(cue_after.get(i, False))
+            entry = per_sample_bucket[(s, bucket)]
+            entry["count"] += 1
+            entry["cue_after_named_word_count"] += int(cue_after.get(i, False))
 
-    per_bucket = {k: dict(buckets[k]) for k in BUCKET_KEYS if k in buckets}
-    for k in BUCKET_KEYS:
-        per_bucket.setdefault(k, {"total": 0, "cue_after_named_word": 0})
+    rows = []
+    for s in range(n_samples):
+        for bucket in BUCKET_KEYS:
+            entry = per_sample_bucket.get((s, bucket), {"count": 0, "cue_after_named_word_count": 0})
+            rows.append(
+                {
+                    "doc_id": doc_id,
+                    "condition": condition.value,
+                    "sample": s,
+                    "offset": bucket,
+                    "count": entry["count"],
+                    "cue_after_named_word_count": entry["cue_after_named_word_count"],
+                }
+            )
+    return rows
+
+
+def base_rate_for_doc(doc_id: str) -> tuple[int, int, float]:
+    """(hits, n, rate): the document-level, condition-B background rate
+    for "a cue immediately follows this within-turn-eligible word" --
+    independent of any draw, sample, or condition (condition A's own
+    rendered-text rate is 0 by construction, not computed here).
+    """
+    path = CORPUS_DIR / f"{doc_id}.trn"
+    real_doc_id, units, *_ = read_trn_document(path)
+    doc = build_document_structure(real_doc_id, units)
+    cue_after = _cue_after_word_flags(doc)
+    candidates = _within_turn_candidate_words(doc)
+    n = len(candidates)
+    hits = sum(1 for w in candidates if cue_after.get(w, False))
+    return hits, n, (hits / n if n else float("nan"))
+
+
+def analyse_cue_adjacency(
+    doc_id: str = DOC_ID,
+    n_samples: int = N_SAMPLES,
+    output_dir: Path = OUTPUT_DIR,
+) -> dict:
+    """Condition B only, pooled over samples -- the file-level summary
+    used by reports/phase2_pilot.md. Built by summing per_sample_offset_rows,
+    so this and the CSV rows can never diverge.
+    """
+    base_rate_hits, base_rate_n, base_rate = base_rate_for_doc(doc_id)
+    rows = per_sample_offset_rows(doc_id, Condition.B, n_samples, output_dir)
+
+    buckets = {k: {"total": 0, "cue_after_named_word": 0} for k in BUCKET_KEYS}
+    for row in rows:
+        b = buckets[row["offset"]]
+        b["total"] += row["count"]
+        b["cue_after_named_word"] += row["cue_after_named_word_count"]
 
     return {
         "base_rate": base_rate,
         "base_rate_n": base_rate_n,
         "base_rate_hits": base_rate_hits,
-        "buckets": per_bucket,
+        "buckets": buckets,
     }
 
 
