@@ -736,6 +736,95 @@ def write_report(batch: list[dict], path: Path = Path("reports/phase2_batch1.md"
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+A_VS_B_CSV = Path("reports/phase2_batch1_a_vs_b.csv")
+BASELINES_WIDE_CSV = Path("reports/phase2_batch1_baselines_wide.csv")
+VS_CUE_RULE_CSV = Path("reports/phase2_batch1_vs_cue_rule.csv")
+
+
+def write_comparison_csvs(batch: list[dict]) -> None:
+    """One CSV per display table in write_report's "A vs. B", "Baselines"
+    and "Where the model stands against the cue rule" sections -- same
+    10 batch files (pilot excluded), same source data (reports/
+    phase2_batch1_scores.csv and _baselines.csv), so these can never
+    diverge from what the report shows. Missing/undefined values (e.g.
+    SBC044 condition A, whose 5 samples are all auto-flagged degenerate)
+    are written as "" (this codebase's existing convention for a missing
+    numeric field, e.g. hyp_ref_ratio in scores.csv), not the string
+    "nan" the markdown report uses for readability.
+    """
+    scores = _read_csv(SCORES_CSV)
+    baselines = _read_csv(BASELINES_CSV)
+    batch_doc_ids = [b["doc_id"] for b in batch if not b["is_pilot"]]
+
+    def _scores_for(doc_id, cond_key, scope, flagged_value="False"):
+        return [
+            r for r in scores
+            if r["doc_id"] == doc_id and r["condition"] == cond_key and r["scope"] == scope and r["flagged"] == flagged_value
+        ]
+
+    def _within_turn_mean(doc_id, cond_key, metric):
+        vals = [float(r[metric]) for r in _scores_for(doc_id, cond_key, "within_turn") if r[metric] != ""]
+        return mean(vals) if vals else float("nan")
+
+    def _collapse_rate_for(doc_id, cond_key):
+        any_rows = [r for r in scores if r["doc_id"] == doc_id and r["condition"] == cond_key]
+        return float(any_rows[0]["collapse_rate"]) if any_rows else float("nan")
+
+    def _baseline_metric(doc_id, baseline_name, metric):
+        rows = [r for r in baselines if r["doc_id"] == doc_id and r["scope"] == "within_turn" and r["baseline"] == baseline_name]
+        return float(rows[0][metric]) if rows else float("nan")
+
+    def _fmt(v):
+        return "" if v != v else f"{v:.4f}"  # v != v is the nan check
+
+    comparison_metrics = ["precision", "recall", "f1", "window_diff", "boundary_similarity", "hyp_ref_ratio"]
+    baseline_metrics = ["precision", "recall", "f1", "window_diff", "boundary_similarity"]
+
+    A_VS_B_CSV.parent.mkdir(parents=True, exist_ok=True)
+    with open(A_VS_B_CSV, "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        header = ["doc_id"]
+        for m in comparison_metrics:
+            header += [f"a_{m}", f"b_{m}"]
+        header += ["a_collapse_rate", "b_collapse_rate"]
+        w.writerow(header)
+        for doc_id in batch_doc_ids:
+            row = [doc_id]
+            for m in comparison_metrics:
+                row += [_fmt(_within_turn_mean(doc_id, "A", m)), _fmt(_within_turn_mean(doc_id, "B", m))]
+            row += [_fmt(_collapse_rate_for(doc_id, "A")), _fmt(_collapse_rate_for(doc_id, "B"))]
+            w.writerow(row)
+
+    with open(BASELINES_WIDE_CSV, "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        header = ["doc_id"]
+        for m in baseline_metrics:
+            header += [f"cue_rule_{m}", f"random_{m}"]
+        w.writerow(header)
+        for doc_id in batch_doc_ids:
+            row = [doc_id]
+            for m in baseline_metrics:
+                row += [_fmt(_baseline_metric(doc_id, "cue_rule", m)), _fmt(_baseline_metric(doc_id, "random", m))]
+            w.writerow(row)
+
+    with open(VS_CUE_RULE_CSV, "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["doc_id", "cue_rule_f1", "a_f1", "a_vs_cue_rule", "a_diff", "b_f1", "b_vs_cue_rule", "b_diff"])
+        for doc_id in batch_doc_ids:
+            cue_f1 = _baseline_metric(doc_id, "cue_rule", "f1")
+            a_f1 = _within_turn_mean(doc_id, "A", "f1")
+            b_f1 = _within_turn_mean(doc_id, "B", "f1")
+            if a_f1 != a_f1:
+                a_verdict, a_diff = "n/a (all samples auto-flagged)", ""
+            else:
+                a_verdict, a_diff = ("beats" if a_f1 > cue_f1 else "loses to"), _fmt(a_f1 - cue_f1)
+            if b_f1 != b_f1:
+                b_verdict, b_diff = "n/a (all samples auto-flagged)", ""
+            else:
+                b_verdict, b_diff = ("beats" if b_f1 > cue_f1 else "loses to"), _fmt(b_f1 - cue_f1)
+            w.writerow([doc_id, _fmt(cue_f1), _fmt(a_f1), a_verdict, a_diff, _fmt(b_f1), b_verdict, b_diff])
+
+
 if __name__ == "__main__":
     batch = select_batch()
     print(format_selection_report(batch))
@@ -746,4 +835,5 @@ if __name__ == "__main__":
               f"{stop.n_failed}/{stop.total_window_draws} window draws failed "
               f"({stop.failure_rate:.1%}) > {MAX_PARSE_FAILURE_RATE:.0%}.")
     write_report(batch)
-    print("\nWrote reports/phase2_batch1.md and the four batch1 CSVs.")
+    write_comparison_csvs(batch)
+    print("\nWrote reports/phase2_batch1.md, the four batch1 CSVs, and the three comparison-table CSVs.")
