@@ -62,6 +62,12 @@ def _compute_metrics(ref_masses: list[int], hyp_masses: list[int]) -> dict:
         "window_diff": window_diff(ref_masses, hyp_masses),
         "boundary_similarity": boundary_similarity(ref_masses, hyp_masses),
         "boundary_count_ratio": boundary_count_ratio,
+        # Plain counts, already computed above for the ratio -- exposed
+        # directly so a caller (e.g. a per-sample CSV row) doesn't have to
+        # re-derive them from boundary_count_ratio, which can lose
+        # precision on the round trip.
+        "n_ref_boundaries": len(ref_b),
+        "n_hyp_boundaries": len(hyp_b),
     }
 
 

@@ -474,3 +474,85 @@ once it is written (reports/phase2_pilot.md's "Next" section) -- a
 matters most for, and should stream one file's row to disk as soon as
 that file's samples are scored, not buffer the whole corpus in memory
 until the run completes or fails.
+
+## 14. Degeneracy threshold: per file, not global -- 11 was calibrated on one outlier
+
+**Finding.** `MAX_LEGITIMATE_RUN=11`/`DEGENERATE_FLAG_THRESHOLD=22`
+(§3, `sbcsae_degenerate_threshold.py`) are whole-corpus constants: 11 is
+the single longest run of consecutive within-turn reference boundaries
+found ANYWHERE in 59 files, and it comes from one file, SBC038. Checked
+directly against the first 10 batch-1 files
+(`sbcsae_degenerate_threshold.file_max_legitimate_run`, reference data
+only, no model call): their own legitimate maxima are
+
+| doc_id | SBC024 | SBC005 | SBC041 | SBC053 | SBC012 | SBC045 | SBC016 | SBC014 | SBC052 | SBC044 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| own max legitimate run | 5 | 4 | 5 | 3 | 5 | 4 | 4 | 4 | 4 | 6 |
+
+None reach 11. A threshold calibrated on the single most extreme file in
+59 is not a meaningful ceiling for a typical file -- it is far too
+lenient for every file except the one it was measured on. SBC053's own
+ceiling is 3, yet under the global rule nothing shorter than 12 even
+gets a manual-review flag; under the global rule's 22-run auto-flag
+line, the whole-corpus figures (23 auto-flagged draws in the 675
+window-draws attempted so far) undercount how often batch-1 files
+actually collapse.
+
+**Decision.** Replaced with a per-file rule
+(`sbcsae_degenerate_threshold.per_file_review_policy`,
+`sbcsae_degenerate_per_file.py`): a run is degenerate iff it is BOTH
+longer than THIS FILE's own observed maximum legitimate run AND
+predicts more than 3x as many boundaries as the reference actually has
+in that same span. Both conditions are needed -- length alone conflates
+"unusual for this file" with "wrong" (a file whose own reference
+regularly contains longer runs of short IUs should not be flagged for
+matching its own normal density); the ratio alone would flag a run that
+is long but still broadly tracks a real, dense stretch of one-word IUs,
+which the file's own reference already shows is legitimate, not a
+collapse.
+
+**Recomputed over every cached batch-1 window-draw (675 attempted, no
+model call -- read from cache only), old rule vs new rule side by
+side:**
+
+| doc_id | cond | file max | attempted | old rule (run>22) | new per-file rule | collapse rate (new) | share of scored words in runs (new) |
+|---|---|---|---|---|---|---|---|
+| SBC024 | A | 5 | 25 | 1 | 4 | 16.0% | 0.44% (57/12,870) |
+| SBC024 | B | 5 | 25 | 0 | 0 | 0.0% | 0.00% |
+| SBC005 | A | 4 | 25 | 1 | 1 | 4.0% | 0.20% (29/14,265) |
+| SBC005 | B | 4 | 25 | 0 | 0 | 0.0% | 0.00% |
+| SBC041 | A | 5 | 30 | 0 | 2 | 6.7% | 0.09% (14/15,375) |
+| SBC041 | B | 5 | 30 | 1 | 5 | 16.7% | 0.57% (88/15,375) |
+| SBC053 | A | 3 | 35 | 4 | 13 | 37.1% | 1.79% (324/18,145) |
+| SBC053 | B | 3 | 35 | 2 | 11 | 31.4% | 0.97% (176/18,145) |
+| SBC012 | A | 5 | 35 | 0 | 1 | 2.9% | 0.05% (10/19,485) |
+| SBC012 | B | 5 | 35 | 1 | 4 | 11.4% | 0.28% (54/19,485) |
+| SBC045 | A | 4 | 40 | 1 | 10 | 25.0% | 0.78% (168/21,410) |
+| SBC045 | B | 4 | 40 | 0 | 8 | 20.0% | 0.27% (58/21,410) |
+| SBC016 | A | 4 | 40 | 1 | 11 | 27.5% | 0.53% (121/22,950) |
+| SBC016 | B | 4 | 40 | 2 | 8 | 20.0% | 0.54% (124/22,950) |
+| SBC014 | A | 4 | 45 | 1 | 7 | 15.6% | 0.52% (128/24,470) |
+| SBC014 | B | 4 | 45 | 1 | 19 | 42.2% | 0.73% (179/24,470) |
+| SBC052 | A | 4 | 50 | 3 | 13 | 26.0% | 0.69% (190/27,530) |
+| SBC052 | B | 4 | 50 | 1 | 9 | 18.0% | 0.37% (101/27,530) |
+| SBC044 | A | 6 | 25 (partial) | 3 | 14 | 56.0% | 0.80% (255/31,860) |
+| SBC044 | B | 6 | 0 (not yet run) | -- | -- | n/a | -- |
+
+**Total: 23 draws flagged under the old rule vs 140 under the new one,
+out of the same 675 attempted window-draws.** The old, globally-lenient
+rule was undercounting degenerate collapse by roughly 6x across this
+batch. `sbcsae_batch1.py` is updated to compute and report both
+`collapse_rate` and `share_words_in_runs` per file/condition alongside
+F1 (columns added to `reports/phase2_batch1_scores.csv`) precisely
+because F1 barely moves when a collapse happens (SBC053 condition A: 4
+of 5 samples auto-flagged under the OLD rule, whole-file F1 moves by
+only 0.007 when they are folded back in -- reports/phase2_pilot.md-style
+degenerate exclusion is necessary but not sufficient; a rate that is
+actually sensitive to how often and how much a document collapses is
+needed alongside it, not instead of it).
+
+The whole-corpus `MAX_LEGITIMATE_RUN`/`DEGENERATE_FLAG_THRESHOLD`
+constants in `sbcsae_degenerate_threshold.py` are left in place (still
+used by the original SBC039 pilot's own already-published analysis,
+untouched by this change) -- the per-file rule is additive, not a
+retroactive rewrite of already-reported figures.

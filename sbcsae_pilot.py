@@ -12,7 +12,12 @@ never asked for -- see sbcsae_scoring.py). Response handling:
 
   - Raw output persisted to disk before parsing, one file per (condition,
     window, sample) -- llm_output_sbcsae/ (gitignored: real transcript-
-    derived content, per the licence's no-corpus-data-in-git rule).
+    derived content, per the licence's no-corpus-data-in-git rule). A
+    fresh call also writes a <same-name>.usage.json sidecar next to it
+    (llm_segmenter.usage_sidecar_path) with response.usage's token
+    counts, so cost is recoverable from the cache directory alone --
+    cache files from before this existed simply have no sidecar, and are
+    never backfilled by re-querying an already-cached sample.
   - Cached and reused; a cached response that fails to parse/validate is
     retried once with a fresh call (same policy as llm_segmenter.py).
   - A turn-initial index in the response is dropped, not treated as an
@@ -44,14 +49,21 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from statistics import mean
 
-from llm_segmenter import call_model, parse_boundary_indices
+from llm_segmenter import call_model, parse_boundary_indices, usage_sidecar_path
 from masses import boundaries_to_masses, masses_to_boundaries
-from sbcsae_degenerate_threshold import max_consecutive_run, review_policy
+from sbcsae_degenerate_threshold import max_consecutive_run_with_span, review_policy
 from sbcsae_llm import build_document_structure, build_prompt, render_window
 from sbcsae_reader import CORPUS_DIR, read_trn_document
 from sbcsae_scoring import score_document
 from sbcsae_tokenizer import Condition
-from sbcsae_windows import ScoreRegion, assert_boundaries_each_in_one_region, assert_regions_tile, build_score_regions
+from sbcsae_windows import (
+    CORE,
+    MARGIN,
+    ScoreRegion,
+    assert_boundaries_each_in_one_region,
+    assert_regions_tile,
+    build_score_regions,
+)
 
 DOC_ID = "SBC039"
 MODEL = "claude-sonnet-5"  # llm_segmenter.DEFAULT_MODEL, same as phase 1
@@ -89,6 +101,9 @@ def _parse_window_response(raw_output: str, region: ScoreRegion, turn_boundaries
     return kept, dropped
 
 
+MAX_FRESH_ATTEMPTS = 2  # CLAUDE.md "Sampling": retry on parse failure, don't just give up on attempt 1
+
+
 def _draw_one_window(
     doc_id: str,
     condition: Condition,
@@ -108,13 +123,24 @@ def _draw_one_window(
         except ValueError:
             pass  # unusable cache; fall through to a fresh call, same policy as llm_segmenter.segment_document
 
-    raw = call_model(prompt, model=MODEL)
-    path.write_text(raw, encoding="utf-8")
-    try:
-        kept, dropped = _parse_window_response(raw, region, turn_boundaries)
-        return WindowDraw(status="ok", kept=kept, dropped_turn_initial=dropped)
-    except ValueError as e:
-        return WindowDraw(status="fail", reason=str(e))
+    # A fresh call that fails to parse is retried (fresh call again, same
+    # cache path -- the new raw output overwrites the unusable one) up to
+    # MAX_FRESH_ATTEMPTS times before this draw is given up on and
+    # counted as failed. This is what CLAUDE.md's "Sampling" section
+    # means by "retry on failure" -- occasional parse failures (~5% per
+    # that section) should not disappear a draw on the first bad
+    # response.
+    reason = ""
+    for _ in range(MAX_FRESH_ATTEMPTS):
+        response = call_model(prompt, model=MODEL)
+        path.write_text(response.text, encoding="utf-8")
+        usage_sidecar_path(path).write_text(json.dumps(response.usage), encoding="utf-8")
+        try:
+            kept, dropped = _parse_window_response(response.text, region, turn_boundaries)
+            return WindowDraw(status="ok", kept=kept, dropped_turn_initial=dropped)
+        except ValueError as e:
+            reason = str(e)
+    return WindowDraw(status="fail", reason=reason)
 
 
 def _core_only(indices: list[int], region: ScoreRegion) -> list[int]:
@@ -185,13 +211,15 @@ def run_pilot(
     n_samples: int = N_SAMPLES,
     conditions: tuple[Condition, ...] = (Condition.A, Condition.B),
     output_dir: Path = OUTPUT_DIR,
+    core: int = CORE,
+    margin: int = MARGIN,
 ) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
     path = CORPUS_DIR / f"{doc_id}.trn"
     real_doc_id, units, *_ = read_trn_document(path)
     doc = build_document_structure(real_doc_id, units)
 
-    regions = build_score_regions(doc.n_tokens)
+    regions = build_score_regions(doc.n_tokens, core=core, margin=margin)
     assert_regions_tile(regions, doc.n_tokens)
     assert_boundaries_each_in_one_region(regions, masses_to_boundaries(doc.ref_masses), doc.n_tokens)
 
@@ -310,14 +338,28 @@ def analyse(pilot: dict) -> dict:
 
         # -- degenerate output, per window draw that succeeded --
         degenerate_flags = []  # (sample, window, run_length, flagged, needs_review)
+        # Every successful draw's own run+span, regardless of whether it
+        # clears review_policy's whole-corpus-calibrated thresholds --
+        # additive only: degenerate_flags/auto_flagged_* below are
+        # unchanged in shape or content for any existing caller. This
+        # lets a caller with file-specific reference data (e.g.
+        # sbcsae_degenerate_threshold.per_file_review_policy, reports/
+        # phase2_llm_design.md's per-file degeneracy rule) re-derive its
+        # own flags from real per-window span data without recomputing
+        # runs from raw cache itself.
+        all_window_runs = []  # (sample, window, run_length, span_start, span_end)
         for s in range(n_samples):
             for w, region in enumerate(regions):
                 d = cdraws[s][w]
                 if d.status != "ok":
                     continue
                 core = sorted(i - 1 for i in _core_only(d.kept, region))
-                run = max_consecutive_run(core)
+                run, span = max_consecutive_run_with_span(core)
                 if run > 0:
+                    span_start, span_end = span
+                    all_window_runs.append(
+                        {"sample": s, "window": w, "run_length": run, "span_start": span_start, "span_end": span_end}
+                    )
                     policy = review_policy(run)
                     if policy["needs_manual_review"]:
                         degenerate_flags.append(
@@ -441,6 +483,7 @@ def analyse(pilot: dict) -> dict:
             "failed": failed,
             "dropped_turn_initial_per_sample": dropped_per_sample,
             "degenerate_flags": degenerate_flags,
+            "all_window_runs": all_window_runs,
             "auto_flagged_samples": auto_flagged_samples,
             "auto_flagged_window_pairs": sorted(auto_flagged_window_pairs),
             "whole_file_scores": whole_file_scores,

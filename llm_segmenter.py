@@ -1,5 +1,6 @@
 import json
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 from anthropic import Anthropic
@@ -89,7 +90,24 @@ def _default_client() -> Anthropic:
     return Anthropic(default_headers={"accept-encoding": "gzip, deflate"})
 
 
-def call_model(prompt: str, model: str = DEFAULT_MODEL, client: Anthropic | None = None) -> str:
+@dataclass
+class ModelResponse:
+    text: str
+    usage: dict  # response.usage.model_dump(mode="json") -- input/output/cache token counts
+
+
+def usage_sidecar_path(raw_path: Path) -> Path:
+    """The usage-log path for a cached raw-output file, e.g. SBC039.txt ->
+    SBC039.usage.json. Written next to a fresh call's raw text (never for
+    a cache hit, since no new response.usage exists for one) so cost is
+    recoverable from the cache directory alone, going forward -- cache
+    files written before this existed simply have no sidecar, and are not
+    backfilled by re-querying an already-cached sample.
+    """
+    return raw_path.with_suffix(".usage.json")
+
+
+def call_model(prompt: str, model: str = DEFAULT_MODEL, client: Anthropic | None = None) -> ModelResponse:
     client = client or _default_client()
     response = client.messages.create(
         model=model,
@@ -111,7 +129,9 @@ def call_model(prompt: str, model: str = DEFAULT_MODEL, client: Anthropic | None
         # pinning).
         messages=[{"role": "user", "content": prompt}],
     )
-    return "".join(block.text for block in response.content if block.type == "text")
+    text = "".join(block.text for block in response.content if block.type == "text")
+    usage = response.usage.model_dump(mode="json") if response.usage is not None else {}
+    return ModelResponse(text=text, usage=usage)
 
 
 def _coerce_index(value) -> int:
@@ -234,9 +254,10 @@ def segment_document(
 
         if prompt is None:
             prompt = prompt_builder(tokens)
-        raw_output = call_model(prompt, model=model, client=client)
-        raw_path.write_text(raw_output, encoding="utf-8")
-        return _parse_and_align(raw_output, ref_masses, tokens)
+        response = call_model(prompt, model=model, client=client)
+        raw_path.write_text(response.text, encoding="utf-8")
+        usage_sidecar_path(raw_path).write_text(json.dumps(response.usage), encoding="utf-8")
+        return _parse_and_align(response.text, ref_masses, tokens)
 
     if n_samples == 1:
         return _one_sample(0)

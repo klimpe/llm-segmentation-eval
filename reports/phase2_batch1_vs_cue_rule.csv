@@ -1,0 +1,11 @@
+doc_id,cue_rule_f1,a_f1,a_vs_cue_rule,a_diff,b_f1,b_vs_cue_rule,b_diff
+SBC024,0.6175,0.5668,loses to,-0.0507,0.6160,loses to,-0.0015
+SBC005,0.6156,0.4846,loses to,-0.1310,0.5675,loses to,-0.0481
+SBC041,0.5477,0.5273,loses to,-0.0204,0.5581,beats,0.0104
+SBC053,0.6254,0.4252,loses to,-0.2002,0.5480,loses to,-0.0774
+SBC012,0.7956,0.5647,loses to,-0.2309,0.6219,loses to,-0.1737
+SBC045,0.6316,0.5285,loses to,-0.1031,0.5645,loses to,-0.0671
+SBC016,0.6975,0.4097,loses to,-0.2878,0.4998,loses to,-0.1977
+SBC014,0.6575,0.4448,loses to,-0.2127,0.5413,loses to,-0.1162
+SBC052,0.5385,0.4917,loses to,-0.0468,0.5376,loses to,-0.0009
+SBC044,0.6411,,n/a (all samples auto-flagged),,0.5497,loses to,-0.0914
