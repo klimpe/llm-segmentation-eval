@@ -115,6 +115,13 @@ is not. Required citation: Du Bois, John W. (2000, 2003, 2005, 2005). Santa
 Barbara Corpus of Spoken American English, Parts 1–4. Philadelphia: Linguistic
 Data Consortium.
 
+This applies to the phase 2 reports themselves, not only to data files: a
+report must not reproduce re-tokenised stretches of the transcript. A short
+quotation that illustrates a method point (one rule's input and output, e.g.
+`s=o` → `so`) is fine; a run of processed IUs — tokeniser output, a rendered
+model prompt, a segmented excerpt — is a piece of processed transcript and is
+not, however it is formatted.
+
 ### Reading the corpus — settled, see reports/phase2_data.md
 
 These were established by full-corpus inspection, not by sampling. Do not
