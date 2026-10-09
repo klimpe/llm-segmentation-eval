@@ -1,0 +1,10 @@
+source,directory,error,files
+archive,metaeval/*,EncodingUndetermined,1
+archive,metaeval/*,TextGridFormatError,1
+archive,these_data/data/CID/PU_auto/Analor/prominence,TextGridFormatError,1
+archive,these_data/data/CID/disfluency/<p10>_et_<p11>,EncodingUndetermined,6
+archive,these_data/data/CID/syntax/morphosyntax/[archive]/TextGrid_v3/latin1,EncodingUndetermined,16
+archive,these_data/data/CID/syntax/morphosyntax/[archive]/TextGrid_v3/problem,EncodingUndetermined,1
+archive,these_data/data/CID/syntax/morphosyntax/[archive]/TextGrid_v3_1/latin1,EncodingUndetermined,15
+archive,these_data/data/CID/syntax/punctuation_<p10>,EncodingUndetermined,16
+archive,work_extracted/*,TextGridFormatError,3

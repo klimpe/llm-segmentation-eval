@@ -1,0 +1,188 @@
+speaker,token_class,tokens
+AB,plain,6463
+AB,pause #,694
+AB,empty label,0
+AB,no letters,104
+AB,contains =,19
+AB,contains digit,8
+AB,ends in -,50
+AB,starts with -,26
+AB,contains _,169
+AB,contains upper-case,50
+AB,other character,0
+AC,plain,6701
+AC,pause #,870
+AC,empty label,0
+AC,no letters,72
+AC,contains =,0
+AC,contains digit,48
+AC,ends in -,74
+AC,starts with -,22
+AC,contains _,157
+AC,contains upper-case,12
+AC,other character,0
+AG,plain,7506
+AG,pause #,861
+AG,empty label,0
+AG,no letters,141
+AG,contains =,1
+AG,contains digit,41
+AG,ends in -,185
+AG,starts with -,24
+AG,contains _,163
+AG,contains upper-case,71
+AG,other character,1
+AP,plain,8856
+AP,pause #,922
+AP,empty label,0
+AP,no letters,40
+AP,contains =,2
+AP,contains digit,12
+AP,ends in -,349
+AP,starts with -,33
+AP,contains _,188
+AP,contains upper-case,40
+AP,other character,0
+BX,plain,6087
+BX,pause #,592
+BX,empty label,0
+BX,no letters,15
+BX,contains =,0
+BX,contains digit,0
+BX,ends in -,53
+BX,starts with -,13
+BX,contains _,109
+BX,contains upper-case,65
+BX,other character,0
+CM,plain,7818
+CM,pause #,1013
+CM,empty label,0
+CM,no letters,221
+CM,contains =,5
+CM,contains digit,14
+CM,ends in -,86
+CM,starts with -,15
+CM,contains _,245
+CM,contains upper-case,52
+CM,other character,0
+EB,plain,6845
+EB,pause #,782
+EB,empty label,0
+EB,no letters,41
+EB,contains =,5
+EB,contains digit,18
+EB,ends in -,247
+EB,starts with -,30
+EB,contains _,103
+EB,contains upper-case,58
+EB,other character,2
+IM,plain,7761
+IM,pause #,870
+IM,empty label,0
+IM,no letters,55
+IM,contains =,0
+IM,contains digit,20
+IM,ends in -,72
+IM,starts with -,11
+IM,contains _,110
+IM,contains upper-case,41
+IM,other character,0
+LJ,plain,9193
+LJ,pause #,883
+LJ,empty label,0
+LJ,no letters,15
+LJ,contains =,6
+LJ,contains digit,8
+LJ,ends in -,335
+LJ,starts with -,38
+LJ,contains _,192
+LJ,contains upper-case,46
+LJ,other character,0
+LL,plain,3615
+LL,pause #,792
+LL,empty label,0
+LL,no letters,80
+LL,contains =,1
+LL,contains digit,7
+LL,ends in -,60
+LL,starts with -,7
+LL,contains _,51
+LL,contains upper-case,6
+LL,other character,0
+MB,plain,9527
+MB,pause #,890
+MB,empty label,0
+MB,no letters,72
+MB,contains =,2
+MB,contains digit,31
+MB,ends in -,77
+MB,starts with -,28
+MB,contains _,136
+MB,contains upper-case,28
+MB,other character,0
+ML,plain,6775
+ML,pause #,797
+ML,empty label,0
+ML,no letters,81
+ML,contains =,1
+ML,contains digit,41
+ML,ends in -,44
+ML,starts with -,27
+ML,contains _,95
+ML,contains upper-case,15
+ML,other character,0
+NH,plain,6824
+NH,pause #,869
+NH,empty label,0
+NH,no letters,157
+NH,contains =,6
+NH,contains digit,5
+NH,ends in -,63
+NH,starts with -,23
+NH,contains _,130
+NH,contains upper-case,11
+NH,other character,0
+SR,plain,6423
+SR,pause #,657
+SR,empty label,0
+SR,no letters,18
+SR,contains =,2
+SR,contains digit,11
+SR,ends in -,182
+SR,starts with -,16
+SR,contains _,110
+SR,contains upper-case,36
+SR,other character,0
+YM,plain,8079
+YM,pause #,926
+YM,empty label,0
+YM,no letters,137
+YM,contains =,1
+YM,contains digit,60
+YM,ends in -,189
+YM,starts with -,10
+YM,contains _,227
+YM,contains upper-case,73
+YM,other character,0
+MG*,plain,8399
+MG*,pause #,751
+MG*,empty label,0
+MG*,no letters,17
+MG*,contains =,1
+MG*,contains digit,8
+MG*,ends in -,75
+MG*,starts with -,12
+MG*,contains _,182
+MG*,contains upper-case,91
+MG*,other character,0
+ALL,plain,108473
+ALL,pause #,12418
+ALL,empty label,0
+ALL,no letters,1249
+ALL,contains =,51
+ALL,contains digit,324
+ALL,ends in -,2066
+ALL,starts with -,323
+ALL,contains _,2185
+ALL,contains upper-case,604
+ALL,other character,3

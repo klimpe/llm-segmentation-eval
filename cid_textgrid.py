@@ -174,3 +174,50 @@ def parse(text: str, encoding: str = "") -> TextGrid:
 def read_textgrid(path: Path) -> TextGrid:
     text, enc = read_text(path)
     return parse(text, enc)
+
+
+# --- committed result tables -------------------------------------------------
+
+REPORTS = Path(__file__).resolve().parent / "reports"
+
+# Annotators' names as they occur in file and tier names (both sources).
+# Each person gets a fixed placeholder, so that two coders' files for the
+# same speaker stay distinct after replacement. Coders are otherwise
+# referred to by the archive's own two-letter initials.
+_PEOPLE = [
+    (r"Anita(?:[-_]?El[Hh]ajj|elhajj)?", "<p1>"),
+    (r"Julie", "<p2>"),
+    (r"antoine", "<p3>"),
+    (r"irina", "<p4>"),
+    (r"laurent", "<p5>"),
+    (r"adesoyer", "<p6>"),
+    (r"mdesoyer", "<p7>"),
+    (r"mmartinez", "<p8>"),
+    (r"mmassot", "<p9>"),
+    (r"Stephane", "<p10>"),
+    (r"Bertille", "<p11>"),
+    (r"Brigitte", "<p12>"),
+    (r"roxane", "<p13>"),
+]
+_PEOPLE_RE = [(re.compile(pat, re.I), rep) for pat, rep in _PEOPLE]
+_PERSON = re.compile("|".join(pat for pat, _ in _PEOPLE), re.I)
+
+
+def public_path(rel: str) -> str:
+    """File, directory or tier name with personal names replaced."""
+    for rx, rep in _PEOPLE_RE:
+        rel = rx.sub(rep, rel)
+    return rel
+
+
+def write_csv(name: str, fieldnames, rows):
+    """Write reports/<name>. Counts, codes and paths only -- never labels
+    taken from a transcript tier."""
+    import csv
+    path = REPORTS / name
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=fieldnames)
+        w.writeheader()
+        for r in rows:
+            w.writerow(r)
+    print(f"wrote {path.relative_to(REPORTS.parent)} ({len(rows)} rows)")

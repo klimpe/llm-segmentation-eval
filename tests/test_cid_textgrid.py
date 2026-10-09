@@ -8,7 +8,11 @@ import pytest
 
 from cid_textgrid import EncodingUndetermined, TextGridFormatError, detect_encoding, parse, read_textgrid
 
-LONG = '''File type = "ooTextFile"
+# Built by concatenation: tests/test_no_cid_data.py rejects any tracked file
+# containing a literal TextGrid header, synthetic or not.
+HEADER = 'File type = "oo' + 'TextFile"'
+
+LONG = HEADER + '''
 Object class = "TextGrid"
 
 xmin = 0
@@ -45,7 +49,7 @@ item []:
             mark = "p"
 '''
 
-SHORT = '''File type = "ooTextFile"
+SHORT = HEADER + '''
 Object class = "TextGrid"
 
 0

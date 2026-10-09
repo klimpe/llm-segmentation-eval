@@ -12,15 +12,16 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-from cid_textgrid import ARCHIVE, DEPOSIT, EncodingUndetermined, TextGridFormatError, read_textgrid
+from cid_textgrid import (ARCHIVE, DEPOSIT, EncodingUndetermined, TextGridFormatError,
+                          public_path, read_textgrid, write_csv)
 
 PROSODY = DEPOSIT / "prosody"
 LEVEL = re.compile(r"^(ip|ap)(\b|[-_])", re.I)
 
 
-# "AP" is also a speaker code: AP_token / AP_ipu are speaker AP's tiers
-# (one archive narrative file), not accentual-phrase tiers.
-NOT_LEVEL = re.compile(r"^AP[-_](token|ipu)$", re.I)
+# "AP" is also a speaker code: AP_token / AP_ipu / AP_story are speaker
+# AP's tiers (archive narrative files), not accentual-phrase tiers.
+NOT_LEVEL = re.compile(r"^AP[-_](token|ipu|story|narr\w*)$", re.I)
 
 
 def level(name):
@@ -48,6 +49,20 @@ def show(rel, dists):
     for lv, name, c in dists:
         print(f"  {rel}\t{lv} (tier {name!r})\t{len(c)} labels\t" +
               " ".join(f"{k!r}:{v}" for k, v in sorted(c.items())))
+
+
+# Only labels of this shape are written to a committed table: an optional
+# level word or "?" (plus the few short variants seen on the archive's
+# ip/ap tiers), optionally followed by a two-digit code. Everything else is
+# counted under "<other>", so no free text can reach the CSV.
+SAFE_LABEL = re.compile(r"^(|IP|AP|ip|ap|ip\?|ap\?\?|apa|an|ep|ipip|\?)( \d\d)?$")
+
+
+ARCH_ROWS = {}
+
+
+def safe_label(lab):
+    return lab if SAFE_LABEL.match(lab) else "<other>"
 
 
 def main(archive_files):
@@ -105,14 +120,32 @@ def main(archive_files):
             continue
         n_files += 1
         show(str(p.relative_to(ARCHIVE)), ds)
-        for lv, _, c in ds:
+        for i, (lv, name, c) in enumerate(ds):
             arch_labels[lv] += c
+            ARCH_ROWS[(str(p.relative_to(ARCHIVE)), lv, f"{name}" if [x[1] for x in ds].count(name) == 1
+                       else f"{name}#{i + 1}")] = c
     print(f"\n{n_files} archive files with ip/ap tiers")
-    by_dir = {}
-    for line in []:
-        pass
     for lv in ("IP", "AP"):
         print(f"archive {lv} label set ({len(arch_labels[lv])}): {dict(sorted(arch_labels[lv].items()))}")
+
+    # --- committed tables ---
+    rows = []
+    for rel, (d, _) in dep.items():
+        for lv in ("IP", "AP"):
+            name, c = d[lv]
+            for lab, n in sorted(c.items()):
+                if safe_label(lab) != lab:
+                    raise ValueError(f"deposit label outside the code set in {rel}")
+                rows.append({"source": "deposit", "file": "prosody/" + rel, "level": lv, "tier": name,
+                             "label": lab, "count": n})
+    for (rel, lv, name), c in sorted(ARCH_ROWS.items()):
+        merged = Counter()
+        for lab, n in c.items():
+            merged[safe_label(lab)] += n
+        for lab, n in sorted(merged.items()):
+            rows.append({"source": "archive", "file": public_path(rel), "level": lv,
+                         "tier": public_path(name), "label": lab, "count": n})
+    write_csv("phase3_ipap_labels.csv", ["source", "file", "level", "tier", "label", "count"], rows)
 
 
 if __name__ == "__main__":

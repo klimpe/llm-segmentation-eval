@@ -1,0 +1,11 @@
+token_class,types_all,tokens_all
+pause #,1,12418
+empty label,0,0
+no letters,4,1249
+contains =,13,51
+contains digit,35,324
+ends in -,464,2066
+starts with -,43,323
+contains _,318,2185
+contains upper-case,272,604
+other character,3,3

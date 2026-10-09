@@ -1,0 +1,5 @@
+speaker,interval_index,gap_start_s,gap_ms,preceding_is_pause,preceding_duration_ms
+AC,1984,1118.3914,56.0,True,0.0
+AG,3083,1284.68,208.0,True,0.0
+LL,1614,784.2595,480.0,True,0.0
+YM,693,396.2112,40.0,True,0.0

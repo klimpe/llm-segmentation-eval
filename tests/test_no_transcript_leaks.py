@@ -115,6 +115,36 @@ ALLOWED_COLUMNS = {
         "total_plain_rule_occurrences", "vanish_share_under_old_rendering",
         "raw_char_count_any_context", "compound_or_other_occurrences",
     },
+    # Phase 3 (CID, embargoed): counts, codes, paths and tier names only.
+    # tests/test_no_cid_data.py additionally checks their contents.
+    "reports/phase3_alignment.csv": {
+        "comparison", "speaker", "tier", "boundaries", "exact", "in_word", "in_pause", "in_gap",
+        "outside", "exact_share", "signed_min_ms", "signed_q1_ms", "signed_median_ms",
+        "signed_q3_ms", "signed_max_ms", "earlier_than_edge", "later_than_edge",
+    },
+    "reports/phase3_alignment_offsets.csv": {"comparison", "speaker", "tier", "abs_offset_bin_ms", "boundaries"},
+    "reports/phase3_deposit_copies.csv": {"deposit_file", "archive_copy", "archive_tier"},
+    "reports/phase3_du_comparison.csv": {
+        "speaker", "file_a", "file_b", "scope", "window_start_s", "window_end_s",
+        "units_a", "units_b", "boundaries_a", "boundaries_b", "a_exact", "a_within_20ms", "a_only",
+        "b_exact", "b_within_20ms", "b_only", "identical_intervals", "identical_categories",
+    },
+    "reports/phase3_encodings.csv": {"source", "directory", "encoding", "files"},
+    "reports/phase3_files_by_directory.csv": {"source", "directory", "files"},
+    "reports/phase3_ipap_labels.csv": {"source", "file", "level", "tier", "label", "count"},
+    "reports/phase3_refused_textgrids.csv": {"source", "directory", "error", "files"},
+    "reports/phase3_speaker_coverage.csv": {"source", "directory", "speaker", "present"},
+    "reports/phase3_tiers_by_file.csv": {"source", "file", "encoding", "tier_index", "tier", "point_tier"},
+    "reports/phase3_token_class_types.csv": {"token_class", "types_all", "tokens_all"},
+    "reports/phase3_token_classes.csv": {"speaker", "token_class", "tokens"},
+    "reports/phase3_token_tier.csv": {
+        "speaker", "source", "intervals", "non_pause", "pauses", "pause_min_s", "pause_q1_s",
+        "pause_median_s", "pause_q3_s", "pause_max_s", "ends_in_hyphen", "nonplain_types",
+        "nonplain_tokens", "contiguous",
+    },
+    "reports/phase3_token_tier_gaps.csv": {
+        "speaker", "interval_index", "gap_start_s", "gap_ms", "preceding_is_pause", "preceding_duration_ms",
+    },
     "results/eng.rst.gum_dev_excluded.csv": {"doc_id", "masked_fraction", "reason"},
     "results/eng.rst.gum_dev_failures.csv": {"doc_id", "reason"},
     "results/eng.rst.gum_dev_masking.csv": {"doc_id", "n_tokens", "masked_fraction"},

@@ -1,0 +1,18 @@
+speaker,source,intervals,non_pause,pauses,pause_min_s,pause_q1_s,pause_median_s,pause_q3_s,pause_max_s,ends_in_hyphen,nonplain_types,nonplain_tokens,contiguous
+AB,unsorted/AB_all.TextGrid,7583,6889,694,0.024,0.548,0.913,2.083,57.676,50,125,426,True
+AC,unsorted/AC_all.TextGrid,7956,7086,870,0.0,0.623,1.075,3.236,29.883,74,118,385,False
+AG,unsorted/AG_all.TextGrid,8994,8133,861,0.0,0.59,0.976,2.718,34.565,185,214,627,False
+AP,unsorted/AP_all.TextGrid,10442,9520,922,0.024,0.529,0.854,1.838,43.894,349,266,664,True
+BX,unsorted/BX_all.TextGrid,6934,6342,592,0.024,0.578,0.9,3.061,74.288,53,102,255,True
+CM,unsorted/CM_all.TextGrid,9469,8456,1013,0.024,0.584,1.021,2.23,39.517,86,150,638,True
+EB,unsorted/EB_all.TextGrid,8131,7349,782,0.024,0.611,1.052,2.89,52.333,247,219,504,True
+IM,unsorted/IM_all.TextGrid,8940,8070,870,0.168,0.564,0.872,1.698,46.424,72,128,309,True
+LJ,unsorted/LJ_all.TextGrid,10716,9833,883,0.024,0.574,0.912,2.124,38.044,335,254,640,True
+LL,unsorted/LL_all.TextGrid,4619,3827,792,0.0,0.747,1.28,3.044,46.528,60,82,212,False
+MB,unsorted/MB_all.TextGrid,10791,9901,890,0.024,0.541,0.825,1.486,50.122,77,138,374,True
+ML,unsorted/ML_all.TextGrid,7876,7079,797,0.024,0.586,0.978,2.25,48.696,44,92,304,True
+NH,unsorted/NH_all.TextGrid,8088,7219,869,0.024,0.508,0.814,1.516,25.806,63,95,395,True
+SR,unsorted/SR_all.TextGrid,7455,6798,657,0.032,0.61,1.198,2.886,67.168,182,170,375,True
+YM,unsorted/YM_all.TextGrid,9702,8776,926,0.0,0.605,0.964,1.924,39.199,189,204,697,False
+MG*,tokens/MG_tokens.TextGrid,9536,8785,751,0.024,0.442,0.659,1.742,76.582,75,143,386,True
+ALL,15 x *_all.TextGrid (MG excluded),127696,115278,12418,0.0,0.578,0.961,2.208,74.288,2066,1152,6805,

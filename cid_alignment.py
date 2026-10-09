@@ -13,7 +13,7 @@ import statistics
 import sys
 from collections import Counter
 
-from cid_textgrid import ARCHIVE_CID, DEPOSIT, SPEAKERS, read_textgrid
+from cid_textgrid import ARCHIVE_CID, DEPOSIT, SPEAKERS, read_textgrid, write_csv
 
 ALL_DIR = ARCHIVE_CID / "unsorted"
 MG_TOKENS = ARCHIVE_CID / "tokens" / "MG_tokens.TextGrid"
@@ -69,6 +69,36 @@ def analyse(spk):
     return out
 
 
+# Rows for the committed tables, filled by main() and deposit_pu().
+SUMMARY, OFFSETS = [], []
+WHERE = ("exact", "in_word", "in_pause", "in_gap", "outside")
+
+
+def record(comparison, spk, tier, n, where, bins, signed):
+    row = {"comparison": comparison, "speaker": spk, "tier": tier, "boundaries": n}
+    row.update({k: where[k] for k in WHERE})
+    row["exact_share"] = round(where["exact"] / n, 4) if n else ""
+    if len(signed) >= 2:
+        q = statistics.quantiles(signed, n=4, method="inclusive")
+        row.update(signed_min_ms=round(min(signed), 1), signed_q1_ms=round(q[0], 1),
+                   signed_median_ms=round(q[1], 1), signed_q3_ms=round(q[2], 1),
+                   signed_max_ms=round(max(signed), 1))
+    row["earlier_than_edge"] = sum(x < 0 for x in signed)
+    row["later_than_edge"] = sum(x > 0 for x in signed)
+    SUMMARY.append(row)
+    for b in bin_order():
+        OFFSETS.append({"comparison": comparison, "speaker": spk, "tier": tier,
+                        "abs_offset_bin_ms": b, "boundaries": bins[b]})
+
+
+def bin_order():
+    lo, out = 0, []
+    for hi in BINS:
+        out.append(f"({lo},{hi}]" if hi != float("inf") else f">{lo}")
+        lo = hi
+    return out
+
+
 def main(speakers):
     total = {n: (0, Counter(), Counter(), []) for n in TIERS}
     for spk in speakers:
@@ -85,11 +115,13 @@ def main(speakers):
                 print("     non-exact offsets (ms): " + ", ".join(f"{b} {c}" for b, c in
                       sorted(bins.items(), key=lambda kv: float(kv[0].strip('(>').split(',')[0]))))
             print("     " + signed_summary(signed))
+            record("all_tier_vs_token", spk, name, n, where, bins, signed)
             tn, tw, tb, ts = total[name]
             total[name] = (tn + n, tw + where, tb + bins, ts + signed)
     if len(speakers) > 1:
         print("\nALL")
         for name, (n, where, bins, signed) in total.items():
+            record("all_tier_vs_token", "ALL", name, n, where, bins, signed)
             print(f"  {name}: {n} boundaries; " + ", ".join(f"{k} {where[k]}" for k in
                   ("exact", "in_word", "in_pause", "in_gap", "outside")))
             print("     non-exact offsets (ms): " + ", ".join(f"{b} {c}" for b, c in
@@ -133,10 +165,12 @@ def deposit_pu(speakers):
             print(f"  {t.name}: {n} boundaries; " + ", ".join(f"{k} {where[k]}" for k in
                   ("exact", "in_word", "in_pause", "in_gap", "outside")))
             print("     " + signed_summary(signed))
+            record("deposit_pu_vs_token", spk, t.name, n, where, bins, signed)
             tn, tw, tb, ts = total[lv]
             total[lv] = (tn + n, tw + where, tb + bins, ts + signed)
     print("\nALL (deposit IP/AP vs archive token tier)")
     for lv, (n, where, bins, signed) in total.items():
+        record("deposit_pu_vs_token", "ALL", lv, n, where, bins, signed)
         print(f"  {lv}: {n} boundaries; " + ", ".join(f"{k} {where[k]}" for k in
               ("exact", "in_word", "in_pause", "in_gap", "outside")))
         print("     non-exact offsets (ms): " + ", ".join(f"{b} {c}" for b, c in
@@ -148,5 +182,15 @@ if __name__ == "__main__":
     if sys.argv[1:2] == ["--deposit-pu"]:
         deposit_pu(sys.argv[2:] or list(SPEAKERS))
         sys.exit()
-    spk = sys.argv[1:] or sorted(p.name.split("_")[0] for p in ALL_DIR.glob("*_all.TextGrid"))
-    main(spk)
+    if sys.argv[1:]:
+        main(sys.argv[1:])
+        sys.exit()
+    # Full run: both comparisons, all speakers, and the committed tables.
+    main(sorted(p.name.split("_")[0] for p in ALL_DIR.glob("*_all.TextGrid")))
+    deposit_pu(list(SPEAKERS))
+    cols = ["comparison", "speaker", "tier", "boundaries", *WHERE, "exact_share",
+            "signed_min_ms", "signed_q1_ms", "signed_median_ms", "signed_q3_ms", "signed_max_ms",
+            "earlier_than_edge", "later_than_edge"]
+    write_csv("phase3_alignment.csv", cols, SUMMARY)
+    write_csv("phase3_alignment_offsets.csv",
+              ["comparison", "speaker", "tier", "abs_offset_bin_ms", "boundaries"], OFFSETS)

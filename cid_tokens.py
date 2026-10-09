@@ -12,7 +12,7 @@ import statistics
 import sys
 from collections import Counter
 
-from cid_textgrid import ARCHIVE_CID, SPEAKERS, read_textgrid
+from cid_textgrid import ARCHIVE_CID, SPEAKERS, read_textgrid, write_csv
 
 ALL_DIR = ARCHIVE_CID / "unsorted"
 # MG has no *_all.TextGrid. tokens/<spk>_tokens.TextGrid carries a token tier
@@ -65,6 +65,8 @@ def main(show_forms: bool):
     all_pause = []
     totals = Counter()
     forms_all = Counter()
+    rows = []
+    gaps = []
     for spk in sorted(present) + ["MG*"]:
         tg = read_textgrid(MG_TOKENS if spk == "MG*" else ALL_DIR / f"{spk}_all.TextGrid")
         items = tg.tier("token").items
@@ -73,6 +75,12 @@ def main(show_forms: bool):
         if spk != "MG*":
             all_pause += pauses
         contiguous = all(a.xmax == b.xmin for a, b in zip(items, items[1:]))
+        for k, (a, b) in enumerate(zip(items, items[1:])):
+            if a.xmax != b.xmin:
+                gaps.append({"speaker": spk, "interval_index": k + 1, "gap_start_s": a.xmax,
+                             "gap_ms": round((b.xmin - a.xmax) * 1000, 3),
+                             "preceding_is_pause": a.text == "#",
+                             "preceding_duration_ms": round((a.xmax - a.xmin) * 1000, 3)})
         cls = Counter()
         nonplain = Counter()
         for w in labels:
@@ -81,6 +89,8 @@ def main(show_forms: bool):
             if c != "plain":
                 nonplain[w] += 1
         by_class[spk] = cls
+        rows.append(stat_row(spk, "tokens/MG_tokens.TextGrid" if spk == "MG*" else f"unsorted/{spk}_all.TextGrid",
+                             labels, pauses, cls, nonplain, contiguous))
         if spk == "MG*":
             print(spk, len(labels), len(labels) - cls["pause #"] - cls["empty label"], len(pauses),
                   *(f"{x:.3f}" for x in quartiles(pauses)), sum(w.endswith("-") for w in labels),
@@ -124,6 +134,37 @@ def main(show_forms: bool):
                                ("no letters", "pause #", "empty label")])
     if show_forms:
         print("\nALL non-plain forms:", forms_all.most_common())
+
+    # --- committed tables: counts and class names only, never forms ---
+    qs = quartiles(all_pause)
+    rows.append({"speaker": "ALL", "source": "15 x *_all.TextGrid (MG excluded)",
+                 "intervals": totals["intervals"], "non_pause": totals["words"], "pauses": totals["pauses"],
+                 "pause_min_s": round(qs[0], 3), "pause_q1_s": round(qs[1], 3), "pause_median_s": round(qs[2], 3),
+                 "pause_q3_s": round(qs[3], 3), "pause_max_s": round(qs[4], 3),
+                 "ends_in_hyphen": totals["trunc"],
+                 "nonplain_types": len([k for k in forms_all if k != "#"]),
+                 "nonplain_tokens": totals["np_tok"], "contiguous": ""})
+    write_csv("phase3_token_tier.csv", list(rows[0]), rows)
+    write_csv("phase3_token_tier_gaps.csv", ["speaker", "interval_index", "gap_start_s", "gap_ms",
+                                             "preceding_is_pause", "preceding_duration_ms"], gaps)
+    crow = [{"speaker": spk, "token_class": n, "tokens": cls[n]} for spk, cls in by_class.items() for n in names]
+    crow += [{"speaker": "ALL", "token_class": n,
+              "tokens": sum(c[n] for s_, c in by_class.items() if s_ != "MG*")} for n in names]
+    write_csv("phase3_token_classes.csv", ["speaker", "token_class", "tokens"], crow)
+    write_csv("phase3_token_class_types.csv", ["token_class", "types_all", "tokens_all"],
+              [{"token_class": n, "types_all": per[n],
+                "tokens_all": sum(v for w, v in forms_all.items() if classify(w) == n)} for n in names[1:]])
+
+
+def stat_row(spk, source, labels, pauses, cls, nonplain, contiguous):
+    qs = quartiles(pauses)
+    return {"speaker": spk, "source": source, "intervals": len(labels),
+            "non_pause": len(labels) - cls["pause #"] - cls["empty label"], "pauses": len(pauses),
+            "pause_min_s": round(qs[0], 3), "pause_q1_s": round(qs[1], 3), "pause_median_s": round(qs[2], 3),
+            "pause_q3_s": round(qs[3], 3), "pause_max_s": round(qs[4], 3),
+            "ends_in_hyphen": sum(w.endswith("-") for w in labels),
+            "nonplain_types": len([k for k in nonplain if k != "#"]),
+            "nonplain_tokens": sum(v for k, v in nonplain.items() if k != "#"), "contiguous": contiguous}
 
 
 if __name__ == "__main__":

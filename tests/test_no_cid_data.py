@@ -71,3 +71,44 @@ def test_cid_data_roots_are_outside_the_repository():
     for root in (ARCHIVE, DEPOSIT.parent.parent):
         r = root.resolve()
         assert r != repo and repo not in r.parents, f"{root} resolves inside the repository"
+
+
+# --- contents of the committed phase 3 tables --------------------------------
+
+import csv  # noqa: E402
+
+from cid_textgrid import _PERSON  # noqa: E402
+from cid_tokens import CLASSES  # noqa: E402
+from cid_ipap_codes import SAFE_LABEL  # noqa: E402
+
+
+def _phase3_csvs():
+    return sorted((REPO_ROOT / "reports").glob("phase3_*.csv"))
+
+
+def _rows(name):
+    with open(REPO_ROOT / "reports" / name, newline="", encoding="utf-8") as f:
+        return list(csv.DictReader(f))
+
+
+def test_phase3_tables_exist():
+    assert len(_phase3_csvs()) >= 10
+
+
+def test_no_annotator_name_in_phase3_outputs():
+    paths = _phase3_csvs() + [REPO_ROOT / "reports" / "phase3_data.md"]
+    bad = [f"{p.name}: {m.group(0)}" for p in paths
+           for m in _PERSON.finditer(p.read_text(encoding="utf-8"))]
+    assert not bad, bad
+
+
+def test_ipap_labels_are_codes_only():
+    bad = [r for r in _rows("phase3_ipap_labels.csv")
+           if r["label"] != "<other>" and not SAFE_LABEL.match(r["label"])]
+    assert not bad, bad[:5]
+
+
+def test_token_classes_are_the_fixed_class_names():
+    allowed = {"plain"} | {n for n, _ in CLASSES}
+    for name in ("phase3_token_classes.csv", "phase3_token_class_types.csv"):
+        assert {r["token_class"] for r in _rows(name)} <= allowed, name

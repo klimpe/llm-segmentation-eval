@@ -13,7 +13,7 @@ import bisect
 from collections import Counter
 from pathlib import Path
 
-from cid_textgrid import ARCHIVE_CID, DEPOSIT, SPEAKERS, read_textgrid
+from cid_textgrid import ARCHIVE_CID, DEPOSIT, SPEAKERS, public_path, read_textgrid, write_csv
 
 TOL = 0.020
 
@@ -96,6 +96,38 @@ def fmt(name_a, name_b, r):
             f"span {sa[0]:.3f}-{sa[1]:.3f} / {sb[0]:.3f}-{sb[1]:.3f}")
 
 
+ROWS = []
+
+
+def category(label):
+    """DU label with the deposit's trailing two-digit suffix removed."""
+    lab = label.strip()
+    return lab.rsplit(" ", 1)[0] if lab[-3:-2] == " " and lab[-2:].isdigit() else lab
+
+
+def record(spk, name_a, a, name_b, b, scope, lo=None, hi=None):
+    _, bnd_a, _ = tier_stats(a)
+    _, bnd_b, _ = tier_stats(b)
+    if scope == "window":
+        bnd_a = [x for x in bnd_a if lo <= x <= hi]
+        bnd_b = [x for x in bnd_b if lo <= x <= hi]
+    ab, ba = directional(bnd_a, bnd_b), directional(bnd_b, bnd_a)
+    same_iv = [(i.xmin, i.xmax) for i in a.items] == [(i.xmin, i.xmax) for i in b.items]
+    ROWS.append({
+        "speaker": spk, "file_a": public_path(name_a), "file_b": public_path(name_b), "scope": scope,
+        "window_start_s": "" if lo is None else round(lo, 3), "window_end_s": "" if hi is None else round(hi, 3),
+        # unit counts are whole-tier; left blank for window rows
+        "units_a": tier_stats(a)[0] if scope == "whole" else "",
+        "units_b": tier_stats(b)[0] if scope == "whole" else "",
+        "boundaries_a": len(bnd_a), "boundaries_b": len(bnd_b),
+        "a_exact": ab["exact"], "a_within_20ms": ab["within20"], "a_only": ab["only"],
+        "b_exact": ba["exact"], "b_within_20ms": ba["within20"], "b_only": ba["only"],
+        "identical_intervals": same_iv,
+        "identical_categories": same_iv and all(category(x.text) == category(y.text)
+                                                for x, y in zip(a.items, b.items)),
+    })
+
+
 def main():
     arch, dep = archive_annotations(), deposit_annotations()
     print("archive DU annotations per speaker:",
@@ -109,11 +141,13 @@ def main():
         for dn, dt in dep[spk]:
             for an, at in arch[spk]:
                 print(fmt(dn, an, compare(dt, at)))
+                record(spk, "deposit/" + dn, dt, "archive/DU/" + an, at, "whole")
         cs = [x for x in dep[spk] if x[0].startswith("C/")]
         for dn, dt in dep[spk]:
             if dn.startswith(("A/", "B/")):
                 for cn, ct in cs:
                     print(fmt(dn, cn, compare(dt, ct)) + "   [deposit vs deposit]")
+                    record(spk, "deposit/" + dn, dt, "deposit/" + cn, ct, "whole")
                     # A/ and B/ cover part of the recording only; restrict both
                     # boundary sets to A/B's labelled window (ignoring the
                     # "dummy" filler intervals B/ uses outside it).
@@ -121,6 +155,7 @@ def main():
                     ba = [b for b in tier_stats(dt)[1] if lo <= b <= hi]
                     bc = [b for b in tier_stats(ct)[1] if lo <= b <= hi]
                     x, y = directional(ba, bc), directional(bc, ba)
+                    record(spk, "deposit/" + dn, dt, "deposit/" + cn, ct, "window", lo, hi)
                     print(f"      within {lo:.3f}-{hi:.3f}s: boundaries {len(ba)} / {len(bc)}; "
                           f"A->B exact {x['exact']} ±20ms {x['within20']} only-A {x['only']}; "
                           f"B->A exact {y['exact']} ±20ms {y['within20']} only-B {y['only']}")
@@ -128,3 +163,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    write_csv("phase3_du_comparison.csv", list(ROWS[0]), ROWS)
