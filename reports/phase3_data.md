@@ -1,0 +1,632 @@
+# Phase 3 — CID: stage 1 data inventory
+
+Working report. Not for circulation. Inventory only: no model calls, no
+processing decisions.
+
+**Embargo.** CID is under embargo until 2065-04-30 (Ortolang deposit
+metadata: restriction AR048, Code du Patrimoine art. L. 213-2, I, 3 —
+privacy). This repository is public. This report therefore contains
+**no transcript text at all**, not even short quotations: counts,
+durations, scores, file and tier names, and annotation codes only. Raw
+examples were inspected on the terminal and are not reproduced here.
+Coders are referred to by the two-letter initials already used in the
+archive's file names; four two-speaker files whose names carry a coder's
+full name are referred to as `NHLL#1`–`NHLL#4`.
+
+**Sources** (both outside the repository, read in place, never copied):
+
+- **archive** — `~/work2/these`, the 2012 thesis archive. CID material is
+  under `these_data/data/CID/`.
+- **deposit** — `~/work2/ortolang-000918`, Ortolang deposit *CID-DISP*
+  (Bertrand, Prévot, Rauzy; LPL UMR 7309; created 2015-04-30;
+  hdl:11041/ortolang-000918). Content under `ortolang-000918/2/`.
+
+**Scripts** (repository root; all print to the terminal, none writes a
+file): `cid_textgrid.py` (reader), `cid_inventory.py` (§1),
+`cid_tokens.py` (§2), `cid_alignment.py` (§3), `cid_du_compare.py` (§4),
+`cid_ipap_codes.py` (§5).
+
+---
+
+## 0. Data paths and the repository guard
+
+Both data roots resolve outside the repository (`~/work2/project`):
+`~/work2/these` and `~/work2/ortolang-000918` are siblings of it, not
+children, and neither is reached through a symlink in the repository (the
+repository's only symlink, `corpora/`, points to `~/work2/corpora`, which
+holds DISRPT and SBCSAE).
+
+`tests/test_no_cid_data.py` fails if any tracked file:
+
+- sits under a path component named `these` or matching `ortolang-*`;
+- has a `.TextGrid` extension (any case);
+- contains a Praat TextGrid header in UTF-8/ASCII or UTF-16 (either byte
+  order) anywhere in its bytes — so a renamed or embedded TextGrid is
+  caught, not only `*.TextGrid`;
+- is a symlink resolving into either data root;
+
+and also fails if either data root resolves inside the repository.
+Checked in both directions: passes on the current tree; with four
+temporary intent-to-add files (`these/a.txt`, `ortolang-x/b.txt`,
+`z.TextGrid`, and a UTF-16BE TextGrid header saved as `disguised.dat`) it
+fails on all four, then the files were removed.
+
+---
+
+## 1. Inventory
+
+### 1.1 Reader
+
+`cid_textgrid.py` detects each file's encoding explicitly from its bytes:
+a BOM (UTF-16BE, UTF-16LE, UTF-8) if present; otherwise ASCII if every byte
+is < 0x80; otherwise UTF-8 if it decodes strictly. Anything else **raises**
+(`EncodingUndetermined`) — including bytes with NULs and no BOM, any
+non-UTF-8 8-bit file (no latin-1 fallback: latin-1 decodes every byte
+string, which would turn an unknown into plausible text), and a file whose
+BOM says one encoding but whose content does not decode in it. Line ends
+are normalised CRLF → LF on reading, as Praat does, including inside
+labels (a few disfluency labels in the deposit contain a CRLF).
+
+**Validated against Praat** (`praat --run`, external reference) on the
+191 TextGrids the steps below use (all deposit TextGrids, all archive
+`*_all.TextGrid`, all archive `DU/`): per tier, the tier name, interval or
+point count, summed end times and summed label lengths. **0 mismatches**
+after one fix: the first comparison found label-length differences on
+five disfluency tiers, traced to CRLF inside labels, which Praat
+normalises and the reader then did not. (Remaining differences were in the
+4th decimal of float sums, i.e. print rounding, compared with tolerance.)
+
+### 1.2 File counts
+
+**Archive**: 23,236 files. By top-level directory: `work_extracted/`
+19,770 (an extracted copy of `work.zip`: thesis-era working directories,
+mostly non-CID); `these_data/` 2,255; `metaeval/` 657; `these1/` 219;
+`speech-units/` 157; `these1brouillon/` 81; `CID/` 66 (Praat Pitch,
+PitchTier, Intensity and IntensityTier objects for all 16 speakers, plus
+two text files); `notes/` 20;
+`created_figures/` 6; top level 5. The CID annotation material is under
+`these_data/data/CID/` (~120 directories) and `these_data/data/stratCID/`
+(§4.5, §5.3).
+
+**Deposit**: 104 files — `discourse/` A 2, B 2, C 16; `disfluency/gold`
+16, `disfluency/naive/<spk>/` 3 per speaker × 16; `prosody/` 12 TextGrids
++ `descr.txt`, `prosody/low-kappa/` 4; `§meta/` 3 (Dublin Core, OLAC,
+RDF).
+
+### 1.3 Encodings
+
+Every TextGrid in both sources was read (whole-corpus, not sampled):
+**6,805 TextGrids, 6,745 read, 60 refused.**
+
+| encoding | files |
+|---|---|
+| UTF-8 (no BOM) | 4,661 |
+| ASCII | 1,816 |
+| UTF-16BE with BOM | 219 |
+| UTF-8 with BOM | 49 |
+| refused (encoding undetermined) | 55 |
+| refused (not a readable TextGrid) | 5 |
+
+**Deposit**: all 100 TextGrids read — ASCII 52 (`discourse/` 20,
+`disfluency/gold` 16, `prosody/` 16), UTF-8 48 (`disfluency/naive/`).
+
+**Files this report uses** (archive): `unsorted/*_all.TextGrid` UTF-16BE
+(all 15); `tokens/*_tokens.TextGrid` UTF-8 (16); `DU/naive/` and
+`DU/expert/` ASCII (40); `DU/naive/original/` ASCII 32 + UTF-16BE 4 (the
+two-speaker `NHLL` files); `stratCID/` ASCII throughout.
+
+Encoding varies **within** directories (e.g. `CID/unsorted/`: 79 ASCII, 34
+UTF-16BE, 1 UTF-8; `syntax/morphosyntax/`: 15 UTF-8-BOM, 1 UTF-8), which is
+why it is detected per file rather than per directory.
+
+**Refused files** (all in the archive; none used by any step here):
+
+| directory | n | reason |
+|---|---|---|
+| `CID/syntax/morphosyntax/[archive]/TextGrid_v3/latin1/` | 16 | 8-bit, not UTF-8 (directory name says latin-1; not assumed) |
+| `CID/syntax/morphosyntax/[archive]/TextGrid_v3_1/latin1/` | 15 | same |
+| `CID/syntax/punctuation_<name>/` | 16 | same |
+| `CID/disfluency/<name>_et_<name>/` | 6 | same |
+| `CID/syntax/morphosyntax/[archive]/TextGrid_v3/problem/` | 1 | UTF-8 BOM followed by non-UTF-8 bytes |
+| `metaeval/__MACOSX/…` | 1 | macOS resource fork (NUL bytes, no BOM) |
+| `CID/PU_auto/Analor/prominence/SR_prominence.TextGrid` | 1 | malformed string; **Praat also refuses it** |
+| three `…/tests/data/sample.TextGrid` | 3 | truncated test fixtures; Praat also refuses |
+| `work_extracted/ML/…/SR_DUv21_predictions.TextGrid` | 1 | a CSV with a TextGrid extension; Praat also refuses |
+
+A first full pass refused 50 more: Praat's older short-format header
+(`"ooTextFile short"`, in `CID/phonemes/`, `stratCID/discourse/`, two
+`cachette/` files). Praat reads these; the reader was fixed to accept the
+header and the pass rerun.
+
+### 1.4 Tier names and speaker coverage
+
+`*_all.TextGrid` (archive, 15 speakers): `ipu`, `token`, `IPU-auto`,
+`periode`, `degand-simon` for all 15; plus `ip`, `ap` for **AB and CM
+only** (7 tiers there, 5 elsewhere).
+
+Deposit, one tier per DU file: the tier name is inherited from the
+archive coder file (`segment-1`, `du-2`, `Du 1`, `du_1`, an empty name,
+…; A/ `du1-<coder>`/`du2-<coder>`). Prosody: `IP`/`AP`, `ip`/`ap` or
+`IP-naive`/`AP-naive` (§5.1). Disfluency gold: one tier `disf-ref`;
+disfluency naive: 2–6 tiers per file, always a `token` tier and a
+`DRMF` or `DRMFI` tier, usually also a DU tier (named as in the DU files)
+and in most files a `completion` tier; two files add `DRMFI/word`.
+
+Speaker coverage, from file names (16 speakers: AB AC AG AP BX CM EB IM
+LJ LL MB MG ML NH SR YM):
+
+| source / directory | speakers |
+|---|---|
+| archive `CID/unsorted/*_all.TextGrid` | 15 (no MG) |
+| archive `CID/tokens/`, `DU/naive/`, `DU/naive/original/`, `IPU_corrected/`, `PU_auto/DS`, `PU_auto/Analor/periods`, every `PU_manual/PU_naive*`, `PU_orchid`, `PB_naive`, `phonemes/`, `syllables/`, `syntax/*`, `disfluency/LRE/` | 16 |
+| archive `PU_auto/Analor/prominence` | 15 (SR's file refused, §1.3) |
+| archive `DU/expert/` | 2 (LL, NH) |
+| archive `PU_manual/PU_expert/` | 5 (AB, AP, CM, EB, SR) |
+| deposit `discourse/C`, `disfluency/gold`, `disfluency/naive` | 16 |
+| deposit `prosody/` (top level + `low-kappa/`) | 12 + 4 = 16 |
+| deposit `discourse/A` / `B` | LL, NH / AG, YM |
+
+### 1.5 MG and `*_all.TextGrid`
+
+**Confirmed: MG has no `*_all.TextGrid`.** `these_data/data/CID/unsorted/`
+holds `*_all.TextGrid` for 15 speakers; MG is the one missing.
+
+MG data does exist elsewhere:
+
+| where | what |
+|---|---|
+| archive `CID/tokens/MG_tokens.TextGrid` | token tier, 9,536 intervals. For the other 15 speakers, `tokens/<spk>_tokens.TextGrid` is **interval-for-interval identical** to the `*_all` token tier (same count, same xmin/xmax/label for every interval — checked for all 15). |
+| archive `CID/unsorted/MG_merged.TextGrid` (UTF-16BE) | tiers phon, syllabe, token (9,536), ipu |
+| archive `CID/DU/naive/` and `DU/naive/original/` | two DU annotations each (coders AD, MZ) |
+| archive `CID/` (top level) | `MG.Pitch`, `.PitchTier`, `.Intensity`, `.IntensityTier` |
+| archive, ~40 other CID directories | MG files in PU_manual, PU_auto, syllables, phonemes, syntax, disfluency, IPU, audio (see §1.2) |
+| deposit `discourse/C/MG_DU_gold.TextGrid` | DU, 1,030 units |
+| deposit `prosody/low-kappa/D_MG_PU.TextGrid` | IP and AP tiers |
+| deposit `disfluency/gold/` and `naive/MG/` | disfluency; the naive files carry a token tier of **9,450** intervals, not 9,536 (not investigated further) |
+
+---
+
+## 2. Token tier of the archive's `*_all.TextGrid`
+
+15 speakers from `*_all.TextGrid`; MG (`MG*`) from
+`tokens/MG_tokens.TextGrid` (§1.5), shown separately and **not** included
+in ALL. "Non-pause" = all intervals except `#`, so it includes the
+no-letter forms below. Pause durations in seconds.
+
+| spk | intervals | non-pause | `#` | `#` min | q1 | median | q3 | max | ends in `-` | non-plain types | non-plain tokens |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| AB | 7583 | 6889 | 694 | 0.024 | 0.548 | 0.913 | 2.083 | 57.676 | 50 | 125 | 426 |
+| AC | 7956 | 7086 | 870 | 0.000 | 0.623 | 1.075 | 3.236 | 29.883 | 74 | 118 | 385 |
+| AG | 8994 | 8133 | 861 | 0.000 | 0.590 | 0.976 | 2.718 | 34.565 | 185 | 214 | 627 |
+| AP | 10442 | 9520 | 922 | 0.024 | 0.529 | 0.854 | 1.838 | 43.894 | 349 | 266 | 664 |
+| BX | 6934 | 6342 | 592 | 0.024 | 0.578 | 0.900 | 3.061 | 74.288 | 53 | 102 | 255 |
+| CM | 9469 | 8456 | 1013 | 0.024 | 0.584 | 1.021 | 2.230 | 39.517 | 86 | 150 | 638 |
+| EB | 8131 | 7349 | 782 | 0.024 | 0.611 | 1.052 | 2.890 | 52.333 | 247 | 219 | 504 |
+| IM | 8940 | 8070 | 870 | 0.168 | 0.564 | 0.872 | 1.698 | 46.424 | 72 | 128 | 309 |
+| LJ | 10716 | 9833 | 883 | 0.024 | 0.574 | 0.912 | 2.124 | 38.044 | 335 | 254 | 640 |
+| LL | 4619 | 3827 | 792 | 0.000 | 0.747 | 1.280 | 3.044 | 46.528 | 60 | 82 | 212 |
+| MB | 10791 | 9901 | 890 | 0.024 | 0.541 | 0.825 | 1.486 | 50.122 | 77 | 138 | 374 |
+| ML | 7876 | 7079 | 797 | 0.024 | 0.586 | 0.978 | 2.250 | 48.696 | 44 | 92 | 304 |
+| NH | 8088 | 7219 | 869 | 0.024 | 0.508 | 0.814 | 1.516 | 25.806 | 63 | 95 | 395 |
+| SR | 7455 | 6798 | 657 | 0.032 | 0.610 | 1.198 | 2.886 | 67.168 | 182 | 170 | 375 |
+| YM | 9702 | 8776 | 926 | 0.000 | 0.605 | 0.964 | 1.924 | 39.199 | 189 | 204 | 697 |
+| **ALL (15)** | **127696** | **115278** | **12418** | 0.000 | 0.578 | 0.961 | 2.208 | 74.288 | **2066** | 1152 | 6805 |
+| MG* | 9536 | 8785 | 751 | 0.024 | 0.442 | 0.659 | 1.742 | 76.582 | 75 | 143 | 386 |
+
+"Non-plain" excludes `#`. Types in ALL are distinct forms across the 15
+speakers, not a sum.
+
+**Tier integrity.** The token tier spans the whole recording from 0 for
+every speaker and has no empty labels. For 11 of 15 speakers it is
+contiguous. AC, AG, LL and YM each have **exactly one** irregularity, of
+the same shape: a zero-duration `#` interval (xmin = xmax) immediately
+followed by a gap (56, 208, 480 and 40 ms respectively) before the next
+interval. These are the four 0.000 pause minima above.
+
+### 2.1 Non-plain forms
+
+A *plain word* is lower-case letters (French accented letters included),
+optionally joined by internal apostrophes or hyphens, optionally ending in
+an elided apostrophe. Everything else is classified below, mutually
+exclusively, first matching class wins (the order is a reporting choice).
+The forms themselves are transcript material and are not listed; the
+classes are defined by shape only.
+
+| class | AB | AC | AG | AP | BX | CM | EB | IM | LJ | LL | MB | ML | NH | SR | YM | ALL | types | MG* |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| plain | 6463 | 6701 | 7506 | 8856 | 6087 | 7818 | 6845 | 7761 | 9193 | 3615 | 9527 | 6775 | 6824 | 6423 | 8079 | 108473 | — | 8399 |
+| pause `#` | 694 | 870 | 861 | 922 | 592 | 1013 | 782 | 870 | 883 | 792 | 890 | 797 | 869 | 657 | 926 | 12418 | 1 | 751 |
+| no letters | 104 | 72 | 141 | 40 | 15 | 221 | 41 | 55 | 15 | 80 | 72 | 81 | 157 | 18 | 137 | 1249 | 4 | 17 |
+| contains `=` | 19 | 0 | 1 | 2 | 0 | 5 | 5 | 0 | 6 | 1 | 2 | 1 | 6 | 2 | 1 | 51 | 13 | 1 |
+| contains digit | 8 | 48 | 41 | 12 | 0 | 14 | 18 | 20 | 8 | 7 | 31 | 41 | 5 | 11 | 60 | 324 | 35 | 8 |
+| ends in `-` | 50 | 74 | 185 | 349 | 53 | 86 | 247 | 72 | 335 | 60 | 77 | 44 | 63 | 182 | 189 | 2066 | 464 | 75 |
+| starts with `-` | 26 | 22 | 24 | 33 | 13 | 15 | 30 | 11 | 38 | 7 | 28 | 27 | 23 | 16 | 10 | 323 | 43 | 12 |
+| contains `_` | 169 | 157 | 163 | 188 | 109 | 245 | 103 | 110 | 192 | 51 | 136 | 95 | 130 | 110 | 227 | 2185 | 318 | 182 |
+| contains upper-case | 50 | 12 | 71 | 40 | 65 | 52 | 58 | 41 | 46 | 6 | 28 | 15 | 11 | 36 | 73 | 604 | 272 | 91 |
+| other character | 0 | 0 | 1 | 0 | 0 | 0 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 3 | 3 | 0 |
+
+Shape-level detail (ALL, 15 speakers), naming only forms that contain no
+speech:
+
+- **no letters**: `+` 1,221; `*` 26; `*_` 1; `**` 1.
+- **contains digit**: 309 tokens are exactly `BUZZ` followed by a number
+  (1–23); 6 more contain `BUZZ<n>` joined to something else; the remaining
+  9 are other upper-case-letter+digit codes.
+- **contains `=`**: 43 are a single letter between two `=` standing alone;
+  8 have `=` attached to a word.
+- **contains `_`** (all classes): 2,240 tokens carry `_`, of which 2,185
+  fall in this class (the rest were classified earlier, e.g. ending in
+  `-`); 41 begin with `-_`.
+- **ends in `-`**: equal to the "ends in `-`" column above (2,066): no
+  earlier class captured a `-`-final token.
+
+---
+
+## 3. Time alignment of other tiers with the token tier (`*_all.TextGrid`)
+
+A boundary is every internal edge of a tier (each interval's xmin except
+the first). Each is located against the token tier: **exact** (equal, as
+parsed, to a token edge), strictly **inside a word** interval, strictly
+**inside a `#`** interval, in a token-tier **gap** (§2), or **outside** the
+token tier's span. Offsets are to the nearest token edge; signed = tier
+boundary minus token edge.
+
+**Tier availability.** `ipu`, `periode` and `degand-simon` are present
+for all 15 speakers. **`ip` and `ap` are present for AB and CM only**; the
+other 13 `*_all.TextGrid` have no ip/ap tier.
+
+### 3.1 One speaker first: AB
+
+| tier | boundaries | exact | in word | in `#` | outside |
+|---|---|---|---|---|---|
+| ip | 2339 | 1 | 1053 | 1284 | 1 |
+| ap | 3318 | 2 | 1995 | 1320 | 1 |
+| ipu | 1533 | 0 | 3 | 1530 | 0 |
+| periode | 1196 | 1172 | 10 | 14 | 0 |
+| degand-simon | 1524 | 1516 | 8 | 0 | 0 |
+
+AB non-exact signed offsets (ms): ip q1 −36.0, median +4.7, q3 +39.0;
+ap q1 −35.9, median +4.7, q3 +36.0; ipu q1 −36.0, median +36.0, q3 +42.0.
+
+### 3.2 All 15 speakers
+
+| tier | spk | boundaries | exact | in word | in `#` | in gap | outside |
+|---|---|---|---|---|---|---|---|
+| ip | 2 (AB, CM) | 5716 | 2 | 2518 | 3192 | 0 | 4 |
+| ap | 2 (AB, CM) | 8311 | 4 | 5035 | 3268 | 0 | 4 |
+| ipu | 15 | 26246 | 0 | 294 | 25940 | 0 | 12 |
+| periode | 15 | 18897 | 18593 (98.4%) | 81 | 223 | 0 | 0 |
+| degand-simon | 15 | 27232 | 27157 (99.7%) | 75 | 0 | 0 | 0 |
+
+Absolute offsets of non-exact boundaries (ms):
+
+| tier | (0,1] | (1,5] | (5,10] | (10,20] | (20,50] | (50,100] | (100,500] | >500 |
+|---|---|---|---|---|---|---|---|---|
+| ip | 80 | 297 | 329 | 570 | 3162 | 657 | 575 | 44 |
+| ap | 167 | 655 | 737 | 1170 | 3931 | 901 | 697 | 49 |
+| ipu | 0 | 0 | 0 | 0 | 19110 | 1536 | 3328 | 2272 |
+| periode | 0 | 0 | 0 | 0 | 91 | 59 | 144 | 10 |
+| degand-simon | 0 | 0 | 0 | 0 | 13 | 10 | 51 | 1 |
+
+Signed offsets of non-exact boundaries (ms):
+
+| tier | n | min | q1 | median | q3 | max | earlier / later |
+|---|---|---|---|---|---|---|---|
+| ip | 5714 | −4092.7 | −36.0 | +4.9 | +39.1 | +5587.1 | 2667 / 3047 |
+| ap | 8307 | −4092.7 | −36.0 | +5.3 | +36.4 | +5587.1 | 3694 / 4613 |
+| ipu | 26246 | −63488.0 | −36.0 | −36.0 | +41.9 | +66770.0 | 13277 / 12969 |
+| periode | 304 | −976.0 | −152.0 | −72.0 | −32.0 | +708.6 | 257 / 47 |
+| degand-simon | 75 | −688.8 | −88.0 | +88.0 | +176.0 | +432.0 | 19 / 56 |
+
+Per speaker, `periode` exact matches range from 1202/1264 (YM, 95.1%)
+to 1462/1467 (NH, 99.7%); `degand-simon` from 2122/2140 (YM, 99.2%) to
+1874/1874 (NH, 100%); `ipu` is 0 exact for every speaker.
+
+### 3.3 Supplementary: the deposit's IP/AP tiers against the archive token tier
+
+Not asked for, added because §3.2 leaves ip/ap available for only two
+speakers in `*_all`. The deposit's `prosody/` has IP and AP tiers for all
+16 speakers (§5); their boundaries were located against the archive token
+tier the same way (MG against `tokens/MG_tokens.TextGrid`).
+
+| tier | spk | boundaries | exact | in word | in `#` | gap | outside |
+|---|---|---|---|---|---|---|---|
+| IP | 16 | 41162 | 41140 (99.95%) | 17 | 5 | 0 | 0 |
+| AP | 16 | 53016 | 52966 (99.91%) | 42 | 8 | 0 | 0 |
+
+Every speaker has ≥ 99.7% exact on both tiers; 100% on both for AB and
+for speaker AP, and 100% on IP also for AG, BX, EB and MG. Non-exact signed offsets: IP n=22, q1 −5.5, median +0.1, q3 +30.3,
+max 438.8 ms; AP n=50, q1 −4.8, median +0.5, q3 +9.0, max 438.8 ms.
+
+The deposit's AB IP tier has 2,461 intervals; the archive AB `*_all` ip
+tier has 2,340. They are not the same tier.
+
+---
+
+## 4. Discourse units: archive vs deposit
+
+**Files.** Archive `DU/naive/` holds `<spk>_<coder>_du.TextGrid`, 2 per
+speaker for 13 speakers, 3 for AG and YM (third coder MD, partial
+coverage), 4 for LL and NH (two of them partial). `DU/naive/original/`
+holds earlier versions of most of the same, plus the four two-speaker
+`NHLL#1–4` files (DU tiers for NH and LL; token tiers matching NH's 8,088
+and LL's 4,619). `DU/expert/` holds LL and NH by coder LP, plus one log
+file. Coders: AD, MD, MR, MT, MZ (naive), LP (expert). The deposit holds
+one `<spk>_DU_gold.TextGrid` per speaker in `discourse/C/` (16), plus
+`A/` (LL, NH) and `B/` (AG, YM). All are single-tier, ASCII. **All 16
+speakers are present on both sides.**
+
+**Definitions.** Unit = interval with a non-blank label. Boundary = every
+internal interval edge. Matching by time: exact (equal as parsed), within
+20 ms (not exact), or present in one version only; both directions.
+
+**Labels** are category codes (`du`, `adu`, `fu`, …). On the deposit
+side every label carries an extra two-digit suffix that the archive
+labels do not have: `01`/`02` in C/ and B/ (B/ also `03`), `10`–`14` in
+A/.
+
+### 4.1 C/ against the archive's `DU/naive/`
+
+For every speaker, **C/ is identical to exactly one archive `DU/naive/`
+file**: same number of intervals, same xmin and xmax for every interval,
+and the same label category on every interval once the deposit's
+two-digit suffix is removed.
+
+| spk | C/ = archive file | units | boundaries | other full-coverage coder(s) in `naive/`: units, boundaries; C→other exact / ±20 ms / only C; other→C only other |
+|---|---|---|---|---|
+| AB | AB_MZ | 1069 | 1635 | AD: 1003, 1563; 1408 / 8 / 219; 147 |
+| AC | AC_MT | 1127 | 1858 | MD: 1101, 1852; 1650 / 3 / 205; 199 |
+| AG | AG_AD | 1077 | 1778 | MT: 1227, 1990; 1627 / 5 / 146; 358 |
+| AP | AP_MZ | 1316 | 2123 | MR: 1272, 2085; 1831 / 2 / 290; 252 |
+| BX | BX_MZ | 804 | 1265 | AD: 730, 1162; 1080 / 2 / 183; 80 |
+| CM | CM_MZ | 1421 | 2365 | AD: 1328, 2218; 2019 / 8 / 338; 191 |
+| EB | EB_MZ | 930 | 1585 | MR: 906, 1551; 1385 / 1 / 199; 165 |
+| IM | IM_MT | 1033 | 1720 | AD: 911, 1545; 1399 / 1 / 320; 145 |
+| LJ | LJ_MZ | 1250 | 1967 | MR: 1185, 1909; 1680 / 5 / 282; 224 |
+| LL | LL_MT | 746 | 1399 | MR: 766, 1431; 1284 / 2 / 113; 145 |
+| MB | MB_MT | 1392 | 2122 | MD: 1332, 2078; 1850 / 1 / 271; 227 |
+| MG | MG_MZ | 1030 | 1598 | AD: 886, 1397; 1295 / 2 / 301; 100 |
+| ML | ML_MT | 933 | 1554 | AD: 846, 1427; 1319 / 3 / 232; 105 |
+| NH | NH_MT | 935 | 1591 | MR: 969, 1667; 1440 / 3 / 148; 224 |
+| SR | SR_MZ | 831 | 1355 | MR: 790, 1310; 1162 / 7 / 186; 141 |
+| YM | YM_AD | 1215 | 2014 | MT: 1424, 2287; 1850 / 6 / 158; 431 |
+
+Partial-coverage archive files (labelled span roughly 0–15 min) against
+C/: AG_MD 240 units, 351 exact, 63 only-archive; YM_MD 304 units, 446
+exact, 67 only-archive; LL_AD 169 / 273 / 29; LL_MZ 226 / 326 / 77;
+NH_AD 169 / 293 / 19; NH_MZ 231 / 349 / 63 (only-C counts for these are
+dominated by the uncovered part of the recording and are not listed).
+
+**`DU/naive/original/` against C/.** The `original/` version by the same
+coder as C/ contains **every** C/ boundary (0 only-C for all 16 speakers;
+0–10 of them at 1–20 ms rather than exact) plus 0–38 boundaries C/ does
+not have (AB 38, CM 36, AP 22, LJ 24, MB 22, AC 12, AG 12, IM 10, EB 8,
+YM 8, LL 6, MG 6, SR 4, NH 2, BX 0, ML 0). Compared directly, the DU tiers of the two-speaker files are
+interval-and-label identical to single-speaker files: `NHLL#4` to
+`original/` NH_du_mt and LL_du_mt; `NHLL#3` to `original/` NH_du_mr and
+LL_du_mr; `NHLL#1` to `naive/` NH_AD and LL_AD; `NHLL#2` to `naive/`
+NH_MZ, and to `naive/` LL_MZ except for one boundary that differs by
+8×10⁻¹² s (stored precision, not an annotation difference — but it counts
+as non-exact under the float-equality definition used throughout).
+
+### 4.2 A/ against the archive
+
+**A/ is identical to `DU/expert/`** (coder LP) for both speakers: LL 210
+units, 367 boundaries, all exact both ways; NH 222 units, 390 boundaries,
+all exact both ways. Same label category on every interval after
+removing the suffix. Labelled span: LL 29.5–916.0 s, NH 13.9–915.3 s.
+
+### 4.3 B/ against the archive
+
+B/ is **not identical** to any archive file. B/AG has 265 units (437
+intervals; `dummy` filler intervals at 0–1 s and from 921.3 s to the end;
+units span 138.2–921.3 s); B/YM 333 units (units span 135.2–922.0 s).
+
+| B/ file | archive file | units B / arch | boundaries B / arch | B→arch exact / ±20 / only B | arch→B only arch |
+|---|---|---|---|---|---|
+| AG | naive/AG_MT (full) | 265 / 1227 | 436 / 1990 | 436 / 0 / 0 | 1554 |
+| AG | naive/AG_AD (full, = C/) | 265 / 1077 | 436 / 1778 | 370 / 2 / 64 | 1406 |
+| AG | naive/AG_MD (partial) | 265 / 240 | 436 / 415 | 375 / 1 / 60 | 39 |
+| YM | naive/YM_MT (full) | 333 / 1424 | 535 / 2287 | 535 / 0 / 0 | 1752 |
+| YM | naive/YM_AD (full, = C/) | 333 / 1215 | 535 / 2014 | 453 / 2 / 80 | 1559 |
+| YM | naive/YM_MD (partial) | 333 / 304 | 535 / 515 | 473 / 0 / 62 | 42 |
+
+Every B/ boundary is present, exactly, in the archive MT file for the
+same speaker.
+
+### 4.4 A/ and B/ against C/
+
+Whole tier, then restricted to A/B's labelled window (both boundary sets
+cut to that window):
+
+| spk | A or B | C/ | units A/B / C | whole: A/B→C exact / ±20 / only A/B; only C | window (s) | window: boundaries A/B / C | window: exact / ±20 / only A/B / only C |
+|---|---|---|---|---|---|---|---|
+| LL | A/ | C/ | 210 / 746 | 316 / 1 / 50; 1082 | 29.5–916.0 | 367 / 377 | 316 / 1 / 50 / 60 |
+| NH | A/ | C/ | 222 / 935 | 347 / 1 / 42; 1243 | 13.9–915.3 | 390 / 372 | 347 / 1 / 42 / 24 |
+| AG | B/ | C/ | 265 / 1077 | 370 / 2 / 64; 1406 | 138.2–921.3 | 435 / 406 | 370 / 2 / 63 / 34 |
+| YM | B/ | C/ | 333 / 1215 | 453 / 2 / 80; 1559 | 135.2–922.0 | 534 / 503 | 453 / 2 / 79 / 48 |
+
+A/ and B/ are distinct annotations from C/: within their own window they
+share 316–453 exact boundaries with C/ and each has 24–79 boundaries the
+other lacks.
+
+### 4.5 The deposit's DU files in the archive's `stratCID/`
+
+Every deposit DU file has an interval-and-label-identical tier (two-digit
+suffix included) in `these_data/data/stratCID/discourse/before_merge/`,
+named by deposit subdirectory: `A_LL_DU`, `A_NH_DU`, `B_AG_DU`, `B_YM_DU`,
+`C_<spk>_DU` for all 16. A/LL and C/LL also appear as tiers of
+`mergingABC/LL_AC.TextGrid`; A/NH and C/NH in `withadu/`. The
+`stratCID/discourse/<spk>_du_strat.TextGrid` files themselves are not
+identical to any deposit file. See §5.3 for the scripts and log found
+there.
+
+### 4.6 File dates (as found on disk)
+
+Modification times, not authoritative (they may reflect copying or
+extraction): archive `DU/naive/original/` 2012-06-28 to 2012-09-15;
+archive `DU/naive/` 2013-12-06 to 2013-12-24; archive `DU/expert/`
+TextGrids 2013-12-07, its log file named and dated 2015-05-14; deposit
+`discourse/` 2016-03-31; archive `*_all.TextGrid` 2012-05-23 (14) and
+2012-06-29 (1). "2012 archive" therefore does not describe every archive
+DU file's date.
+
+---
+
+## 5. IP and AP label codes
+
+### 5.1 Deposit `prosody/`
+
+12 files at top level and 4 under `low-kappa/` (AC, AP, IM, MG, prefixed
+`D_`): **16 speakers, one file each**. All ASCII, each with exactly one
+IP and one AP tier, named `IP`/`AP` (AB, CM), `ip`/`ap` (EB, SR) or
+`IP-naive`/`AP-naive` (the other 12). Every non-empty label has the form
+`IP NN` / `AP NN`; no other non-empty label occurs.
+
+**`descr.txt` reproduced exactly** by the 12 top-level files (not
+including `low-kappa/`): IP 29,714 items, AP 37,963 items, every
+per-label count equal, total duration 42,373.457 s. Its "Groups: 12" is
+consistent with that.
+
+Per file (empty = intervals with empty label):
+
+| file | IP codes | AP codes |
+|---|---|---|
+| AB | empty 680; 10: 152, 11: 109, 12: 52, 20: 418, 21: 444, 22: 606 | empty 701; 10: 276, 11: 230, 12: 400, 20: 249, 21: 517, 22: 1013 |
+| CM | empty 1079; 10: 206, 11: 296, 12: 24, 20: 498, 21: 692, 22: 732 | empty 1105; 00: 1, 10: 934, 11: 1454, 12: 922, 20: 81, 21: 137, 22: 185 |
+| EB | empty 596; 01: 807, 02: 594, 10: 65, 11: 57, 12: 47 | empty 596; 01: 580, 02: 1296, 10: 36, 11: 52, 12: 94 |
+| SR | empty 511; 01: 733, 02: 1071, 10: 40, 11: 30, 12: 81 | empty 511; 01: 596, 02: 1364, 10: 55, 11: 35, 12: 89 |
+| NH | empty 643; 01: 89, 02: 217, 03: 1326 | empty 643; 01: 76, 02: 204, 03: 2194 |
+| AG | empty 654; 01: 666, 02: 694 | empty 654; 01: 654, 02: 1498 |
+| BX | empty 445; 01: 148, 02: 1193 | empty 445; 01: 314, 02: 1614 |
+| LJ | empty 630; 01: 266, 02: 1943 | empty 630; 01: 298, 02: 2581 |
+| LL | empty 612; 01: 487, 02: 663 | empty 612; 01: 305, 02: 1144 |
+| MB | empty 706; 01: 514, 02: 2383 | empty 706; 01: 194, 02: 3116 |
+| ML | empty 587; 01: 532, 02: 1081 | empty 587; 01: 732, 02: 1430 |
+| YM | empty 647; 01: 184, 02: 1784 | empty 647; 01: 505, 02: 2671 |
+| low-kappa/D_AC | empty 660; 01: 1165, 02: 732 | empty 660; 01: 727, 02: 1798 |
+| low-kappa/D_AP | empty 660; 01: 2012, 02: 758 | empty 660; 01: 1340, 02: 2412 |
+| low-kappa/D_IM | empty 605; 01: 1979, 02: 769 | empty 605; 01: 1889, 02: 2191 |
+| low-kappa/D_MG | empty 493; 01: 1058, 02: 573 | empty 493; 01: 608, 02: 1686 |
+
+Code sets: IP {01, 02, 03, 10, 11, 12, 20, 21, 22}; AP the same plus
+{00} (one interval, CM). By file, four patterns occur: {10–12, 20–22}
+(AB, CM); {01, 02, 10–12} (EB, SR); {01, 02, 03} (NH); {01, 02} (the
+other 11, including all four low-kappa files). Within each file the
+number of empty-label intervals is the same on IP and AP except AB (680
+/ 701) and CM (1079 / 1105).
+
+### 5.2 Archive ip/ap tiers
+
+Every archive TextGrid with a tier named ip/ap (any case, any suffix) was
+checked: **949 files** across the whole archive. (Two narrative files
+with tiers named `AP_token`, `AP_ipu`, `AP_narr…` are speaker AP's tiers,
+not phrase tiers, and are excluded.)
+
+**Under `these_data/data/CID/` the two-digit codes do not occur.** The
+257 files there with ip/ap tiers carry bare labels: `IP`/`AP` (all
+`PU_manual/PU_naive*` directories: `IP` and `AP` only, plus empty);
+`ip`/`ap` with `?` and a few other short strings (`PU_expert/`,
+`unsorted/`).
+
+The archive `*_all.TextGrid` ip/ap tiers (AB, CM): AB ip-tier `ip` 1427,
+`?` 184, empty 728, one single space; ap-tier `ap` 2415, `?` 116, `apa`
+20, `an` 1, empty 767. CM ip-tier `ip` 1929, `?` 308, `ap` 1, `ep` 1,
+empty 1139; ap-tier `ap` 3667, `?` 157, `ap??` 3, `an` 1, `ep` 1, empty
+1165.
+
+**The two-digit codes do occur elsewhere in the archive**, in
+`these_data/data/stratCID/prosody/` and its subdirectories, and in a
+handful of files under `work_extracted/ML/` and `work_extracted/metaeval/`
+(only the `1x`/`2x` codes there):
+
+| archive directory | files with codes | codes present |
+|---|---|---|
+| `stratCID/prosody/` | 12 | 00–03, 10–12, 20–22 |
+| `stratCID/prosody/before_merge/` | 18 | 01–03, 10–12, 20–22 |
+| `stratCID/prosody/other_versions/` (6 variants: 200, 400, 800 ×3, 1000 ms) | 12–23 each | 01–02 (200 ms); otherwise 01–03, 10–12, 20–22, and 00 in two |
+| `stratCID/` top-level comparison file; `stratCID/script/testdata/` | 1 + 1 | 01–02; 10–12, 20–22 |
+| `work_extracted/ML/…` (5 directories) | 12 | 10–12, 20–22 |
+| `work_extracted/metaeval/old2/result/test` | 1 | 10–12, 20–22 |
+
+In these files the code is sometimes attached to `?`, lower-case `ip`/`ap`
+or other short labels (e.g. `? 10`, `ap 21`), not only to `IP`/`AP`.
+
+### 5.3 The deposit's prosody files in the archive
+
+**Each of the 12 top-level deposit prosody files is identical** (tier
+names, every interval, every label) to `stratCID/prosody/<spk>_PU.TextGrid`
+and to `stratCID/prosody/other_versions/prosody800ms/<spk>_PU.TextGrid`.
+`stratCID/prosody/descr.txt` is byte-identical to the deposit's. The four
+`low-kappa/` files have **no** identical counterpart anywhere in
+`stratCID/` (`stratCID/prosody/before_merge/` has files of the same names,
+`D_AC_PU` etc., that differ).
+
+`stratCID/` also holds the scripts `script/create_corpus_prosody.py` and
+`create_corpus_discourse.py` (Python 2, writing to a path under the
+author's home directory), a `prosody/before_merge/description.org`, and
+generation logs. Stated facts from these files, **not verified against
+the data and not interpreted here**:
+
+- `description.org` defines four strata for prosody: A = 2 experts + 2
+  naive coders (AB, CM); B = 1 expert + 2 naive (EB, SR); C = 3 naive
+  (NH); D = 2 naive (13 speakers listed, "only speakers with κ > 0.6").
+- `create_corpus_prosody.py` has one function per stratum whose docstring
+  reads "Adds agreement information to the labels"; each appends a
+  two-digit string and a bracketed maximum to the label (`[22]`, `[12]`,
+  `[03]`, `[02]` for A–D). `create_corpus_discourse.py` does the same for
+  DU (`[14]`, `[03]`, `[02]`).
+- The script's output format (`<label> NN [MM]`, to a directory
+  `prosody800ms3/`) is **not** the deposit's label format (`IP NN`, no
+  bracket). So this script version is not shown to have produced the
+  deposit files.
+- `generation.log` records, per speaker, which coders' DU files were
+  grouped (e.g. AB: AD and MZ; AG: AD, MT, MD trimmed to 0–922.184 s, then
+  MT and AD), with a stratum letter.
+
+---
+
+## 6. Still unknown
+
+- **Meaning of the deposit's two-digit IP/AP codes** (`00`–`03`,
+  `10`–`12`, `20`–`22`) **and of the DU label suffixes** (`01`–`03`,
+  `10`–`14`). `descr.txt` gives counts only. A candidate source exists in
+  the archive (`stratCID/script/create_corpus_*.py`, docstrings "Adds
+  agreement information to the labels", and `description.org` defining
+  strata A–D, §5.3), but its output format is not the deposit's, the
+  `00` code and the `low-kappa/` files are not accounted for, and nothing
+  here checks the codes against the coder files they would summarise.
+  Not established.
+- **Whether the 2012 and 2015 DU annotations are the same campaign.**
+  Established: C/ is boundary- and category-identical to one archive
+  `DU/naive/` file per speaker, and A/ to `DU/expert/` (§4.1–4.2). Not
+  established: whether the deposit's DU files are the output of the
+  `stratCID/` scripts (identical copies sit in
+  `stratCID/discourse/before_merge/`, §4.5, but the script version found
+  writes a different label format); whether the archive `DU/naive/` files themselves (dated
+  2013 on disk, §4.6) are the 2012 campaign or a later revision of
+  `DU/naive/original/` (dated 2012), which contains every C/ boundary
+  plus 0–38 more; and what the 2015 deposit added beyond the label
+  suffix. Nor which of C/ (one coder per speaker, coder varying by
+  speaker), A/ or B/ is meant as "gold".
+- **What B/ is.** Its boundaries are an exact subset of the archive MT
+  file within ~135–922 s for AG and YM (§4.3); whether it is MT's
+  annotation revised, adjudicated, or something else is not known.
+- **What `low-kappa/` means** for the four prosody files beyond its name,
+  and where they come from: unlike the other 12, they have no identical
+  copy in the archive (§5.3).
+- **Why the deposit's IP/AP tiers align exactly with the archive token
+  tier but the archive `*_all` ip/ap tiers do not** (median absolute
+  offset in the 20–50 ms bin, signed quartiles near ±36 ms, §3.2 vs
+  §3.3), and likewise why `ipu` boundaries never coincide with token
+  edges (signed median −36 ms).
+- **Why MG's disfluency-file token tier has 9,450 intervals** against
+  9,536 in `tokens/MG_tokens.TextGrid` (§1.5); the same comparison has
+  not been made for the other 15 speakers.
+- **The four zero-duration `#` + gap irregularities** (AC, AG, LL, YM,
+  §2): origin unknown.
+- **`BUZZ<n>`, `+`, `*`, `=x=`, `_`-joined and `-`-initial token forms**
+  (§2.1): counted by shape; their transcription conventions have not been
+  looked up.
+- **Archive files that could not be decoded** (§1.3): encoding not
+  determined, by design not guessed.
