@@ -125,6 +125,8 @@ Rules the pipeline holds itself to:
 
 ## Data
 
+Code is MIT-licensed (`LICENSE`); the corpora are not covered by it.
+
 No corpus data is in this repository. SBCSAE is distributed by UCSB
 under CC Attribution-NoDerivatives 3.0 US; processed transcript text is
 not published here, only counts, scores and short illustrative
