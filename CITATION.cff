@@ -1,0 +1,55 @@
+cff-version: 1.2.0
+title: llm-segmentation-eval
+message: If you use this software, please cite it as below.
+type: software
+authors:
+  - family-names: Peshkov
+    given-names: Klim
+repository-code: "https://github.com/klimpe/llm-segmentation-eval"
+abstract: >-
+  Evaluation of LLM segmentation of transcripts against human
+  annotation, read against inter-annotator agreement. Covers
+  written text (DISRPT), spoken English (Santa Barbara Corpus;
+  intonation units, i.e. prosodic rather than discourse
+  segmentation) and, in progress, spoken French (CID).
+keywords:
+  - discourse segmentation
+  - prosodic segmentation
+  - evaluation
+  - inter-annotator agreement
+  - spoken language
+  - prosody
+license: MIT
+date-released: "2026-10-11"
+references:
+  - type: conference-paper
+    title: >-
+      Segmentation evaluation metrics, a comparison grounded on
+      prosodic and discourse units
+    authors:
+      - family-names: Peshkov
+        given-names: Klim
+      - family-names: Prévot
+        given-names: Laurent
+    collection-title: >-
+      Proceedings of the Ninth International Conference on Language
+      Resources and Evaluation (LREC'14)
+    conference:
+      name: LREC 2014
+      city: Reykjavik
+      country: IS
+    year: 2014
+    start: 321
+    end: 325
+    url: "http://www.lrec-conf.org/proceedings/lrec2014/pdf/931_Paper.pdf"
+  - type: data
+    title: Santa Barbara Corpus of Spoken American English, Parts 1–4
+    authors:
+      - family-names: Du Bois
+        given-names: John W.
+    publisher:
+      name: Linguistic Data Consortium
+      city: Philadelphia
+    notes: >-
+      Parts 1–4 published 2000, 2003, 2005, 2005. Licence
+      CC BY-ND 3.0 US.
